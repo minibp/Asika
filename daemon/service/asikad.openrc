@@ -1,0 +1,20 @@
+#!/sbin/openrc-run
+
+name="asikad"
+description="Asika PR Manager Daemon"
+command="/usr/local/bin/asikad"
+command_args=""
+pidfile="/run/asikad.pid"
+command_background=yes
+export ASIKA_CONFIG="/etc/asika_config.toml"
+export GOMEMLIMIT="256MiB"
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath --directory --owner asika:asika /var/lib/asika
+    checkpath --directory --owner asika:asika /var/log/asika
+}

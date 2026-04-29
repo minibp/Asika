@@ -1,0 +1,91 @@
+# Asika Configuration Example
+
+# Server configuration
+[server]
+listen = ":8080"
+mode   = "release"
+
+# Mode: single | multi
+mode = "multi"
+
+# Database
+[database]
+path = "/var/lib/asika/asika.db"
+
+# Authentication
+[auth]
+jwt_secret = "your-secret-key-change-me"
+token_expiry = "72h"
+
+# Notifications (optional)
+[[notify]]
+type = "smtp"
+[notify.config]
+host     = "smtp.example.com"
+port     = 587
+username = "asika@example.com"
+password = "your-password"
+to       = ["admin@example.com"]
+
+# Events
+[events]
+mode = "webhook"
+webhook_secret = "shared-secret"
+
+# Git
+[git]
+workdir = "/var/lib/asika/work"
+
+# Tokens
+[tokens]
+github = "ghp_xxxxxxxxxxxx"
+gitlab = "glpat-xxxxxxxxxxxx"
+gitea  = "xxxxxxxxxxxxxxxx"
+
+# Label rules (hot reload)
+[[label_rules]]
+pattern = "**/*.go"
+label   = "go"
+
+[[label_rules]]
+pattern = "**/*.js"
+label   = "javascript"
+
+# Spam detection
+[spam]
+enabled = true
+time_window = "10m"
+threshold = 3
+trigger_on_author = true
+trigger_on_similar_title = true
+title_similarity_threshold = 0.8
+trigger_on_keywords = ["spam", "hack", "crypto"]
+
+# Merge queue defaults
+[merge_queue]
+required_approvals = 1
+core_contributors = ["admin", "lead-dev"]
+
+# Global hook path
+hookpath = ""
+
+# Repo groups (multi mode)
+[[repo_groups]]
+name = "main-project"
+github = "owner/repo"
+gitlab = "group/repo"
+gitea  = "owner/repo"
+default_branch = "main"
+hookpath = "/etc/asika/hooks/main-project"
+ci_provider = "github_actions"
+[repo_groups.merge_queue]
+required_approvals = 2
+core_contributors = ["lead-dev"]
+
+# Single repo config (single mode)
+[single_repo]
+platform = "github"
+repo     = "owner/repo"
+default_branch = "main"
+hookpath = ""
+ci_provider = "github_actions"

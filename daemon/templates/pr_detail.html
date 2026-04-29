@@ -1,0 +1,18 @@
+{{define "content"}}
+<h1>PR Detail</h1>
+<p>Repository Group: {{.repo_group}}</p>
+<p>PR ID: {{.pr_id}}</p>
+<div>
+    <button onclick="approve()">Approve</button>
+    <button onclick="closePR()">Close</button>
+    <button onclick="reopenPR()">Reopen</button>
+</div>
+<script>
+    async function approve() {
+        await fetch('/api/v1/repos/{{.repo_group}}/prs/{{.pr_id}}/approve', {
+            method: 'POST',
+            headers: {'Authorization': 'Bearer ' + localStorage.getItem('token')}
+        });
+    }
+</script>
+{{end}}

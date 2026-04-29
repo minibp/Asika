@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Setup Wizard - Asika</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        .step { margin: 20px 0; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        input, select { display: block; margin: 10px 0; padding: 8px; width: 100%; }
+        button { padding: 10px 20px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Setup Wizard</h1>
+    <div id="wizard">
+        <div class="step" id="step1">
+            <h2>Step 1: Mode Selection</h2>
+            <select id="mode">
+                <option value="single">Single Repo</option>
+                <option value="multi">Multi Platform</option>
+            </select>
+            <button onclick="nextStep(1)">Next</button>
+        </div>
+    </div>
+    <script>
+        let currentStep = 1;
+        let wizardData = {};
+
+        async function nextStep(step) {
+            // Save data and move to next step
+            currentStep = step + 1;
+            // Implementation would continue here
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+[Unit]
+Description=Asika PR Manager Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=asika
+Group=asika
+ExecStart=/usr/local/bin/asikad
+Environment=ASIKA_CONFIG=/etc/asika_config.toml
+Environment=GOMEMLIMIT=256MiB
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=asikad
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/asika /var/log/asika
+
+[Install]
+WantedBy=multi-user.target

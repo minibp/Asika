@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head><title>Asika</title></head>
+<body>
+    <h1>Asika PR Manager</h1>
+    <p>Redirecting...</p>
+    <script>
+        // Redirect to wizard if not initialized, otherwise to dashboard
+        fetch('/api/v1/wizard').then(r => {
+            if (r.status === 404) {
+                window.location = '/dashboard';
+            } else {
+                window.location = '/wizard';
+            }
+        });
+    </script>
+</body>
+</html>
