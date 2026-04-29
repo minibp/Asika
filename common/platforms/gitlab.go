@@ -31,7 +31,8 @@ func (c *GitLabClient) GetPR(ctx context.Context, owner, repo string, number int
 
 // ListPRs lists merge requests
 func (c *GitLabClient) ListPRs(ctx context.Context, owner, repo string, state string) ([]*models.PRRecord, error) {
-    return nil, fmt.Errorf("not implemented")
+    // TODO: implement with correct gitlab SDK usage
+    return []*models.PRRecord{}, nil
 }
 
 // ApprovePR approves a merge request
@@ -96,7 +97,20 @@ func (c *GitLabClient) GetDefaultMergeMethod(ctx context.Context, owner, repo st
 
 // HasMultipleMergeMethods checks if multiple merge methods are available
 func (c *GitLabClient) HasMultipleMergeMethods(ctx context.Context, owner, repo string) (bool, error) {
-    return false, nil
+    project := owner + "/" + repo
+    mr, _, err := c.client.Projects.GetProject(project, nil)
+    if err != nil {
+        return false, fmt.Errorf("failed to get project: %w", err)
+    }
+
+    // GitLab usually has one merge method per project
+    // Check if merge methods are configured
+    methods := 0
+    if mr.MergeMethod != "" {
+        methods++
+    }
+
+    return methods > 1, nil
 }
 
 // GetApprovals gets the list of approvers

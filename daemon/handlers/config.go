@@ -12,7 +12,12 @@ import (
 
 // GetConfig returns current config (with sensitive data masked)
 func GetConfig(c *gin.Context) {
-    cfg := config.Current
+    cfg := config.Current()
+
+    if cfg == nil {
+        c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config not loaded"})
+        return
+    }
 
     // Create a copy with masked sensitive fields
     masked := *cfg

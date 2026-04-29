@@ -20,7 +20,7 @@ func ListPRs(c *gin.Context) {
     state := c.DefaultQuery("state", "open")
     platform := c.DefaultQuery("platform", "")
 
-    cfg := config.Current
+    cfg := config.Current()
     group := config.GetRepoGroupByName(cfg, repoGroup)
     if group == nil {
         c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found", "code": 404})

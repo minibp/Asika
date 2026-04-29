@@ -31,7 +31,55 @@ func (c *GiteaClient) GetPR(ctx context.Context, owner, repo string, number int)
 
 // ListPRs lists pull requests
 func (c *GiteaClient) ListPRs(ctx context.Context, owner, repo string, state string) ([]*models.PRRecord, error) {
-    return nil, fmt.Errorf("not implemented")
+    opts := gitea.ListPullRequestsOptions{
+        State: gitea.StateType(state),
+        ListOptions: gitea.ListOptions{Page: 1, PageSize: 100},
+    }
+
+    var result []*models.PRRecord
+    for {
+        prs, _, err := c.client.ListRepoPullRequests(owner, repo, opts)
+        if err != nil {
+            return nil, fmt.Errorf("failed to list PRs: %w", err)
+        }
+
+        if len(prs) == 0 {
+            break
+        }
+
+        for _, pr := range prs {
+            record := &models.PRRecord{
+                ID:           fmt.Sprintf("%d", pr.ID),
+                RepoGroup:    "",
+                Platform:      "gitea",
+                PRNumber:     int(pr.Index),
+                Title:        pr.Title,
+                Author:       pr.Poster.UserName,
+                State:        string(pr.State),
+                Labels:       extractGiteaLabels(pr.Labels),
+                MergeCommitSHA: "",
+                SpamFlag:     false,
+                UpdatedAt:    *pr.Created,
+                Events:       []models.PREvent{},
+            }
+            result = append(result, record)
+        }
+
+        if len(prs) < 100 {
+            break
+        }
+        opts.Page++
+    }
+
+    return result, nil
+}
+
+func extractGiteaLabels(labels []*gitea.Label) []string {
+    result := make([]string, 0, len(labels))
+    for _, l := range labels {
+        result = append(result, l.Name)
+    }
+    return result
 }
 
 // ApprovePR approves a pull request
@@ -96,6 +144,9 @@ func (c *GiteaClient) GetDefaultMergeMethod(ctx context.Context, owner, repo str
 
 // HasMultipleMergeMethods checks if multiple merge methods are available
 func (c *GiteaClient) HasMultipleMergeMethods(ctx context.Context, owner, repo string) (bool, error) {
+    // Gitea/Forgejo typically supports merge, squash, rebase
+    // TODO: check actual repo settings via API
+    // For now, assume single method
     return false, nil
 }
 

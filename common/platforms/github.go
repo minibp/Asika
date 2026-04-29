@@ -30,7 +30,51 @@ func (c *GitHubClient) GetPR(ctx context.Context, owner, repo string, number int
 
 // ListPRs lists pull requests
 func (c *GitHubClient) ListPRs(ctx context.Context, owner, repo string, state string) ([]*models.PRRecord, error) {
-    return nil, fmt.Errorf("not implemented")
+    opts := &github.PullRequestListOptions{
+        State: state,
+        ListOptions: github.ListOptions{PerPage: 100},
+    }
+
+    var result []*models.PRRecord
+    for {
+        prs, resp, err := c.client.PullRequests.List(ctx, owner, repo, opts)
+        if err != nil {
+            return nil, fmt.Errorf("failed to list PRs: %w", err)
+        }
+
+        for _, pr := range prs {
+            record := &models.PRRecord{
+                ID:           fmt.Sprintf("%d", pr.GetID()),
+                RepoGroup:    "",
+                Platform:      "github",
+                PRNumber:     pr.GetNumber(),
+                Title:        pr.GetTitle(),
+                Author:       pr.GetUser().GetLogin(),
+                State:        pr.GetState(),
+                Labels:       extractLabels(pr.Labels),
+                MergeCommitSHA: pr.GetMergeCommitSHA(),
+                SpamFlag:     false,
+                UpdatedAt:    pr.GetUpdatedAt().Time,
+                Events:       []models.PREvent{},
+            }
+            result = append(result, record)
+        }
+
+        if resp.NextPage == 0 {
+            break
+        }
+        opts.Page = resp.NextPage
+    }
+
+    return result, nil
+}
+
+func extractLabels(labels []*github.Label) []string {
+    result := make([]string, 0, len(labels))
+    for _, l := range labels {
+        result = append(result, l.GetName())
+    }
+    return result
 }
 
 // ApprovePR approves a pull request
@@ -95,7 +139,25 @@ func (c *GitHubClient) GetDefaultMergeMethod(ctx context.Context, owner, repo st
 
 // HasMultipleMergeMethods checks if multiple merge methods are available
 func (c *GitHubClient) HasMultipleMergeMethods(ctx context.Context, owner, repo string) (bool, error) {
-    return false, nil
+    // Get repository info to check merge methods
+    r, _, err := c.client.Repositories.Get(ctx, owner, repo)
+    if err != nil {
+        return false, fmt.Errorf("failed to get repo: %w", err)
+    }
+
+    // Count available merge methods
+    methods := 0
+    if r.GetAllowMergeCommit() {
+        methods++
+    }
+    if r.GetAllowSquashMerge() {
+        methods++
+    }
+    if r.GetAllowRebaseMerge() {
+        methods++
+    }
+
+    return methods > 1, nil
 }
 
 // GetApprovals gets the list of approvers

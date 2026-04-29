@@ -28,8 +28,7 @@ func NewServer(cfg *models.Config) *Server {
     engine := gin.New()
 
     // Load HTML templates
-    // Note: In production, use proper template loading
-    // For now, we'll use inline responses in handlers
+    engine.LoadHTMLGlob("daemon/templates/*.html")
 
     s := &Server{
         cfg:    cfg,
@@ -171,44 +170,25 @@ func (s *Server) setupRoutes() {
         }
     }
 
-    // WebUI routes - serve simple HTML directly
+    // WebUI routes - use templates
     s.engine.GET("/", func(c *gin.Context) {
-        c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(`
-            <!DOCTYPE html>
-            <html>
-            <head><title>Asika</title></head>
-            <body>
-                <h1>Asika PR Manager</h1>
-                <p>Server is running. Please use the API or configure via wizard.</p>
-            </body>
-            </html>
-        `))
+        c.HTML(http.StatusOK, "index.html", gin.H{"title": "Asika PR Manager"})
     })
 
     s.engine.GET("/wizard", func(c *gin.Context) {
-        c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(`
-            <!DOCTYPE html>
-            <html>
-            <head><title>Wizard - Asika</title></head>
-            <body>
-                <h1>Initialization Wizard</h1>
-                <p>Please run: asika wizard</p>
-            </body>
-            </html>
-        `))
+        c.HTML(http.StatusOK, "wizard.html", gin.H{"title": "Setup Wizard"})
     })
 
     s.engine.GET("/dashboard", func(c *gin.Context) {
-        c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(`
-            <!DOCTYPE html>
-            <html>
-            <head><title>Dashboard - Asika</title></head>
-            <body>
-                <h1>Dashboard</h1>
-            </body>
-            </html>
-        `))
+        c.HTML(http.StatusOK, "dashboard.html", gin.H{"title": "Dashboard"})
     })
+
+    s.engine.GET("/login", func(c *gin.Context) {
+        c.HTML(http.StatusOK, "login.html", gin.H{"title": "Login"})
+    })
+
+    // Webhook routes (no auth)
+    s.engine.POST("/webhook/:repo_group/:platform", handlers.WebhookHandler)
 }
 
 // Start starts the server

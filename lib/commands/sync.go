@@ -1,7 +1,11 @@
 package commands
 
 import (
+    "encoding/json"
     "fmt"
+    "io"
+    "net/http"
+    "os"
 
     "github.com/spf13/cobra"
 )
@@ -17,7 +21,42 @@ var syncHistoryCmd = &cobra.Command{
     Use:   "history",
     Short: "Show sync history",
     Run: func(cmd *cobra.Command, args []string) {
-        fmt.Println("Sync history")
+        server, _ := cmd.Flags().GetString("server")
+        if server == "" {
+            server = "http://localhost:8080"
+        }
+
+        url := fmt.Sprintf("%s/api/v1/sync/history", server)
+        req, err := http.NewRequest("GET", url, nil)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+
+        token, _ := cmd.Flags().GetString("token")
+        if token == "" {
+            token = os.Getenv("ASIKA_TOKEN")
+        }
+        if token != "" {
+            req.Header.Set("Authorization", "Bearer "+token)
+        }
+
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+            body, _ := io.ReadAll(resp.Body)
+            fmt.Printf("Error: HTTP %d - %s\n", resp.StatusCode, string(body))
+            return
+        }
+
+        var history []interface{}
+        json.NewDecoder(resp.Body).Decode(&history)
+        fmt.Println(history)
     },
 }
 
@@ -27,6 +66,41 @@ var syncRetryCmd = &cobra.Command{
     Short: "Retry a failed sync",
     Args:  cobra.ExactArgs(1),
     Run: func(cmd *cobra.Command, args []string) {
+        syncID := args[0]
+
+        server, _ := cmd.Flags().GetString("server")
+        if server == "" {
+            server = "http://localhost:8080"
+        }
+
+        url := fmt.Sprintf("%s/api/v1/sync/retry/%s", server, syncID)
+        req, err := http.NewRequest("POST", url, nil)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+
+        token, _ := cmd.Flags().GetString("token")
+        if token == "" {
+            token = os.Getenv("ASIKA_TOKEN")
+        }
+        if token != "" {
+            req.Header.Set("Authorization", "Bearer "+token)
+        }
+
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+            body, _ := io.ReadAll(resp.Body)
+            fmt.Printf("Error: HTTP %d - %s\n", resp.StatusCode, string(body))
+            return
+        }
+
         fmt.Println("Sync retry triggered")
     },
 }

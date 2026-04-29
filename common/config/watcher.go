@@ -48,6 +48,13 @@ func (w *Watcher) watch(configPath string) {
             if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
                 if filepath.Clean(event.Name) == filepath.Clean(configPath) {
                     slog.Info("config file changed, reloading")
+                    cfg, err := Load(configPath)
+                    if err != nil {
+                        slog.Error("failed to reload config", "error", err)
+                        return
+                    }
+                    Store(cfg)
+                    slog.Info("config reloaded successfully")
                     if w.onReload != nil {
                         w.onReload()
                     }

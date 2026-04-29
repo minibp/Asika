@@ -3,11 +3,11 @@ package commands
 import (
     "encoding/json"
     "fmt"
+    "io"
     "net/http"
+    "os"
 
     "github.com/spf13/cobra"
-
-    "asika/common/config"
 )
 
 // prCmd represents the pr command
@@ -26,8 +26,27 @@ var prListCmd = &cobra.Command{
         state, _ := cmd.Flags().GetString("state")
         platform, _ := cmd.Flags().GetString("platform")
 
-        url := fmt.Sprintf("%s/api/v1/repos/%s/prs?state=%s&platform=%s", config.Current.Server.Listen, repoGroup, state, platform)
-        resp, err := http.Get(url)
+        server, _ := cmd.Flags().GetString("server")
+        if server == "" {
+            server = "http://localhost:8080"
+        }
+
+        url := fmt.Sprintf("%s/api/v1/repos/%s/prs?state=%s&platform=%s", server, repoGroup, state, platform)
+        req, err := http.NewRequest("GET", url, nil)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+
+        token, _ := cmd.Flags().GetString("token")
+        if token == "" {
+            token = os.Getenv("ASIKA_TOKEN")
+        }
+        if token != "" {
+            req.Header.Set("Authorization", "Bearer "+token)
+        }
+
+        resp, err := http.DefaultClient.Do(req)
         if err != nil {
             fmt.Printf("Error: %v\n", err)
             return
@@ -35,7 +54,8 @@ var prListCmd = &cobra.Command{
         defer resp.Body.Close()
 
         if resp.StatusCode != http.StatusOK {
-            fmt.Printf("Error: HTTP %d\n", resp.StatusCode)
+            body, _ := io.ReadAll(resp.Body)
+            fmt.Printf("Error: HTTP %d - %s\n", resp.StatusCode, string(body))
             return
         }
 
@@ -54,8 +74,27 @@ var prShowCmd = &cobra.Command{
         repoGroup := args[0]
         prID := args[1]
 
-        url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s", config.Current.Server.Listen, repoGroup, prID)
-        resp, err := http.Get(url)
+        server, _ := cmd.Flags().GetString("server")
+        if server == "" {
+            server = "http://localhost:8080"
+        }
+
+        url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s", server, repoGroup, prID)
+        req, err := http.NewRequest("GET", url, nil)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+
+        token, _ := cmd.Flags().GetString("token")
+        if token == "" {
+            token = os.Getenv("ASIKA_TOKEN")
+        }
+        if token != "" {
+            req.Header.Set("Authorization", "Bearer "+token)
+        }
+
+        resp, err := http.DefaultClient.Do(req)
         if err != nil {
             fmt.Printf("Error: %v\n", err)
             return
@@ -63,7 +102,8 @@ var prShowCmd = &cobra.Command{
         defer resp.Body.Close()
 
         if resp.StatusCode != http.StatusOK {
-            fmt.Printf("Error: HTTP %d\n", resp.StatusCode)
+            body, _ := io.ReadAll(resp.Body)
+            fmt.Printf("Error: HTTP %d - %s\n", resp.StatusCode, string(body))
             return
         }
 
@@ -79,7 +119,43 @@ var prApproveCmd = &cobra.Command{
     Short: "Approve a pull request",
     Args:  cobra.ExactArgs(2),
     Run: func(cmd *cobra.Command, args []string) {
-        fmt.Println("PR approved")
+        repoGroup := args[0]
+        prID := args[1]
+
+        server, _ := cmd.Flags().GetString("server")
+        if server == "" {
+            server = "http://localhost:8080"
+        }
+
+        url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s/approve", server, repoGroup, prID)
+        req, err := http.NewRequest("POST", url, nil)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+
+        token, _ := cmd.Flags().GetString("token")
+        if token == "" {
+            token = os.Getenv("ASIKA_TOKEN")
+        }
+        if token != "" {
+            req.Header.Set("Authorization", "Bearer "+token)
+        }
+
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+            body, _ := io.ReadAll(resp.Body)
+            fmt.Printf("Error: HTTP %d - %s\n", resp.StatusCode, string(body))
+            return
+        }
+
+        fmt.Println("PR approved successfully")
     },
 }
 
@@ -89,7 +165,43 @@ var prCloseCmd = &cobra.Command{
     Short: "Close a pull request",
     Args:  cobra.ExactArgs(2),
     Run: func(cmd *cobra.Command, args []string) {
-        fmt.Println("PR closed")
+        repoGroup := args[0]
+        prID := args[1]
+
+        server, _ := cmd.Flags().GetString("server")
+        if server == "" {
+            server = "http://localhost:8080"
+        }
+
+        url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s/close", server, repoGroup, prID)
+        req, err := http.NewRequest("POST", url, nil)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+
+        token, _ := cmd.Flags().GetString("token")
+        if token == "" {
+            token = os.Getenv("ASIKA_TOKEN")
+        }
+        if token != "" {
+            req.Header.Set("Authorization", "Bearer "+token)
+        }
+
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+            body, _ := io.ReadAll(resp.Body)
+            fmt.Printf("Error: HTTP %d - %s\n", resp.StatusCode, string(body))
+            return
+        }
+
+        fmt.Println("PR closed successfully")
     },
 }
 
@@ -99,7 +211,43 @@ var prReopenCmd = &cobra.Command{
     Short: "Reopen a pull request",
     Args:  cobra.ExactArgs(2),
     Run: func(cmd *cobra.Command, args []string) {
-        fmt.Println("PR reopened")
+        repoGroup := args[0]
+        prID := args[1]
+
+        server, _ := cmd.Flags().GetString("server")
+        if server == "" {
+            server = "http://localhost:8080"
+        }
+
+        url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s/reopen", server, repoGroup, prID)
+        req, err := http.NewRequest("POST", url, nil)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+
+        token, _ := cmd.Flags().GetString("token")
+        if token == "" {
+            token = os.Getenv("ASIKA_TOKEN")
+        }
+        if token != "" {
+            req.Header.Set("Authorization", "Bearer "+token)
+        }
+
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+            body, _ := io.ReadAll(resp.Body)
+            fmt.Printf("Error: HTTP %d - %s\n", resp.StatusCode, string(body))
+            return
+        }
+
+        fmt.Println("PR reopened successfully")
     },
 }
 
@@ -109,7 +257,52 @@ var prSpamCmd = &cobra.Command{
     Short: "Mark/unmark spam",
     Args:  cobra.ExactArgs(2),
     Run: func(cmd *cobra.Command, args []string) {
+        repoGroup := args[0]
+        prID := args[1]
         undo, _ := cmd.Flags().GetBool("undo")
+
+        server, _ := cmd.Flags().GetString("server")
+        if server == "" {
+            server = "http://localhost:8080"
+        }
+
+        var method string
+        var endpoint string
+        if undo {
+            endpoint = fmt.Sprintf("%s/api/v1/repos/%s/prs/%s/spam", server, repoGroup, prID)
+            method = "DELETE"
+        } else {
+            endpoint = fmt.Sprintf("%s/api/v1/repos/%s/prs/%s/spam", server, repoGroup, prID)
+            method = "POST"
+        }
+
+        req, err := http.NewRequest(method, endpoint, nil)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+
+        token, _ := cmd.Flags().GetString("token")
+        if token == "" {
+            token = os.Getenv("ASIKA_TOKEN")
+        }
+        if token != "" {
+            req.Header.Set("Authorization", "Bearer "+token)
+        }
+
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+            body, _ := io.ReadAll(resp.Body)
+            fmt.Printf("Error: HTTP %d - %s\n", resp.StatusCode, string(body))
+            return
+        }
+
         if undo {
             fmt.Println("Spam mark removed")
         } else {

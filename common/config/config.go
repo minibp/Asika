@@ -3,6 +3,7 @@ package config
 import (
     "fmt"
     "os"
+    "sync/atomic"
     "time"
 
     "github.com/BurntSushi/toml"
@@ -13,11 +14,25 @@ import (
 )
 
 var (
-    // Current holds the current configuration
-    Current *models.Config
+    // current holds the current configuration atomically
+    current atomic.Value
     // ConfigPath is the path to the config file
     ConfigPath string
 )
+
+// Current returns the current configuration
+func Current() *models.Config {
+    v := current.Load()
+    if v == nil {
+        return nil
+    }
+    return v.(*models.Config)
+}
+
+// Store stores the configuration atomically
+func Store(cfg *models.Config) {
+    current.Store(cfg)
+}
 
 // Load loads configuration from the TOML file
 func Load(path string) (*models.Config, error) {
@@ -57,7 +72,7 @@ func Load(path string) (*models.Config, error) {
         return nil, err
     }
 
-    Current = cfg
+    Store(cfg)
     ConfigPath = path
     return cfg, nil
 }

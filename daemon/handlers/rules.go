@@ -14,7 +14,12 @@ import (
 
 // GetLabelRules gets the current label rules
 func GetLabelRules(c *gin.Context) {
-    cfg := config.Current
+    cfg := config.Current()
+
+    if cfg == nil {
+        c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config not loaded"})
+        return
+    }
 
     // Try to get from DB first (hot-loaded)
     data, err := db.Get(db.BucketConfig, "label_rules")
@@ -53,7 +58,11 @@ func UpdateLabelRules(c *gin.Context) {
     }
 
     // Update in-memory config
-    config.Current.LabelRules = rules
+    cfg := config.Current()
+    if cfg != nil {
+        cfg.LabelRules = rules
+        config.Store(cfg)
+    }
 
     c.JSON(http.StatusOK, gin.H{"message": "label rules updated"})
 }
