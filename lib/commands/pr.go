@@ -5,7 +5,6 @@ import (
     "fmt"
     "io"
     "net/http"
-    "os"
 
     "github.com/spf13/cobra"
 )
@@ -26,10 +25,7 @@ var prListCmd = &cobra.Command{
         state, _ := cmd.Flags().GetString("state")
         platform, _ := cmd.Flags().GetString("platform")
 
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/repos/%s/prs?state=%s&platform=%s", server, repoGroup, state, platform)
         req, err := http.NewRequest("GET", url, nil)
@@ -38,10 +34,7 @@ var prListCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -74,10 +67,7 @@ var prShowCmd = &cobra.Command{
         repoGroup := args[0]
         prID := args[1]
 
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s", server, repoGroup, prID)
         req, err := http.NewRequest("GET", url, nil)
@@ -86,10 +76,7 @@ var prShowCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -122,10 +109,7 @@ var prApproveCmd = &cobra.Command{
         repoGroup := args[0]
         prID := args[1]
 
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s/approve", server, repoGroup, prID)
         req, err := http.NewRequest("POST", url, nil)
@@ -134,10 +118,7 @@ var prApproveCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -168,10 +149,7 @@ var prCloseCmd = &cobra.Command{
         repoGroup := args[0]
         prID := args[1]
 
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s/close", server, repoGroup, prID)
         req, err := http.NewRequest("POST", url, nil)
@@ -180,10 +158,7 @@ var prCloseCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -214,10 +189,7 @@ var prReopenCmd = &cobra.Command{
         repoGroup := args[0]
         prID := args[1]
 
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s/reopen", server, repoGroup, prID)
         req, err := http.NewRequest("POST", url, nil)
@@ -226,10 +198,7 @@ var prReopenCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -261,10 +230,7 @@ var prSpamCmd = &cobra.Command{
         prID := args[1]
         undo, _ := cmd.Flags().GetBool("undo")
 
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         var method string
         var endpoint string
@@ -282,10 +248,7 @@ var prSpamCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -323,4 +286,6 @@ func init() {
     prListCmd.Flags().String("state", "open", "Filter by state")
     prListCmd.Flags().String("platform", "", "Filter by platform")
     prSpamCmd.Flags().Bool("undo", false, "Remove spam mark")
+
+    RootCmd.AddCommand(prCmd)
 }

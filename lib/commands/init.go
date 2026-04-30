@@ -70,15 +70,9 @@ var initCmd = &cobra.Command{
 		configTOML := generateConfigForInit(listen, mode, dbPath, jwtSecret, tokenExpiry, repoMode)
 
 		// Send to server via HTTP
-		server, _ := cmd.Flags().GetString("server")
-		if server == "" {
-			server = "http://localhost:8080"
-		}
+		server := GetServer(cmd)
 
-		token, _ := cmd.Flags().GetString("token")
-		if token == "" {
-			token = os.Getenv("ASIKA_TOKEN")
-		}
+		token := GetToken(cmd)
 
 		// Convert TOML to JSON for API
 		var cfg map[string]interface{}

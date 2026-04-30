@@ -5,7 +5,6 @@ import (
     "fmt"
     "io"
     "net/http"
-    "os"
 
     "github.com/spf13/cobra"
 )
@@ -21,10 +20,7 @@ var syncHistoryCmd = &cobra.Command{
     Use:   "history",
     Short: "Show sync history",
     Run: func(cmd *cobra.Command, args []string) {
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/sync/history", server)
         req, err := http.NewRequest("GET", url, nil)
@@ -33,10 +29,7 @@ var syncHistoryCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -68,10 +61,7 @@ var syncRetryCmd = &cobra.Command{
     Run: func(cmd *cobra.Command, args []string) {
         syncID := args[0]
 
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/sync/retry/%s", server, syncID)
         req, err := http.NewRequest("POST", url, nil)
@@ -80,10 +70,7 @@ var syncRetryCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -111,4 +98,6 @@ func init() {
 
     syncHistoryCmd.Flags().String("repo_group", "", "Filter by repo group")
     syncHistoryCmd.Flags().Int("limit", 20, "Max number of records")
+
+    RootCmd.AddCommand(syncCmd)
 }

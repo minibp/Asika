@@ -5,7 +5,6 @@ import (
     "fmt"
     "io"
     "net/http"
-    "os"
 
     "github.com/spf13/cobra"
 )
@@ -24,10 +23,7 @@ var queueListCmd = &cobra.Command{
     Run: func(cmd *cobra.Command, args []string) {
         repoGroup := args[0]
 
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/queue/%s", server, repoGroup)
         req, err := http.NewRequest("GET", url, nil)
@@ -36,10 +32,7 @@ var queueListCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -71,10 +64,7 @@ var queueRecheckCmd = &cobra.Command{
     Run: func(cmd *cobra.Command, args []string) {
         repoGroup := args[0]
 
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/queue/%s/recheck", server, repoGroup)
         req, err := http.NewRequest("POST", url, nil)
@@ -83,10 +73,7 @@ var queueRecheckCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -111,4 +98,6 @@ var queueRecheckCmd = &cobra.Command{
 func init() {
     queueCmd.AddCommand(queueListCmd)
     queueCmd.AddCommand(queueRecheckCmd)
+
+    RootCmd.AddCommand(queueCmd)
 }

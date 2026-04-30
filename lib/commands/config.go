@@ -23,10 +23,7 @@ var configShowCmd = &cobra.Command{
     Use:   "show",
     Short: "Show current config (masked)",
     Run: func(cmd *cobra.Command, args []string) {
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/config", server)
         req, err := http.NewRequest("GET", url, nil)
@@ -35,10 +32,7 @@ var configShowCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -67,15 +61,9 @@ var configSetCmd = &cobra.Command{
     Use:   "set",
     Short: "Set configuration (reads from file or stdin, sends to server)",
     Run: func(cmd *cobra.Command, args []string) {
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
 
         // Read config from file or stdin
         var inputData []byte
@@ -149,10 +137,7 @@ var configReloadCmd = &cobra.Command{
     Use:   "reload",
     Short: "Trigger config hot reload",
     Run: func(cmd *cobra.Command, args []string) {
-        server, _ := cmd.Flags().GetString("server")
-        if server == "" {
-            server = "http://localhost:8080"
-        }
+        server := GetServer(cmd)
 
         url := fmt.Sprintf("%s/api/v1/config", server)
         req, err := http.NewRequest("PUT", url, nil)
@@ -161,10 +146,7 @@ var configReloadCmd = &cobra.Command{
             return
         }
 
-        token, _ := cmd.Flags().GetString("token")
-        if token == "" {
-            token = os.Getenv("ASIKA_TOKEN")
-        }
+        token := GetToken(cmd)
         if token != "" {
             req.Header.Set("Authorization", "Bearer "+token)
         }
@@ -192,4 +174,6 @@ func init() {
     configCmd.AddCommand(configReloadCmd)
 
     configSetCmd.Flags().String("file", "", "Path to TOML config file (if not provided, reads from stdin)")
+
+    RootCmd.AddCommand(configCmd)
 }
