@@ -1,22 +1,36 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 	"log/slog"
 
+	"asika/common/auth"
 	"asika/common/config"
+	"asika/common/db"
 	"asika/common/models"
 )
 
+type wizardPayload struct {
+	models.Config
+	Users []wizardUser `json:"users"`
+}
+
+type wizardUser struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
+}
+
 // GetWizardSteps handles GET /api/v1/wizard (10. WebUI Wizard)
 func GetWizardSteps(c *gin.Context) {
-	// Check if already initialized
-	if config.IsInitialized(config.ConfigPath) {
+	if config.Current() != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "already initialized"})
 		return
 	}
@@ -46,44 +60,109 @@ func SubmitWizardStep(c *gin.Context) {
 }
 
 // CompleteWizard handles POST /api/v1/wizard/step/complete (10. WebUI Wizard)
-// Writes config to /etc/asika_config.toml
 func CompleteWizard(c *gin.Context) {
-	var cfg models.Config
+	slog.Info("wizard: completing setup")
 
-	if err := c.ShouldBindJSON(&cfg); err != nil {
+	var payload wizardPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid config", "detail": err.Error()})
 		return
 	}
 
-	// Get config path
-	configPath := os.Getenv("ASIKA_CONFIG")
-	if configPath == "" {
-		configPath = "/etc/asika_config.toml"
+	cfg := payload.Config
+
+	// Set defaults
+	if cfg.Server.Listen == "" {
+		cfg.Server.Listen = ":8080"
+	}
+	if cfg.Server.Mode == "" {
+		cfg.Server.Mode = "release"
+	}
+	if cfg.Database.Path == "" {
+		cfg.Database.Path = "/var/lib/asika/asika.db"
+	}
+	if cfg.Auth.JWTSecret == "" {
+		cfg.Auth.JWTSecret = config.GenerateUUID()
+	}
+	if cfg.Auth.TokenExpiry == "" {
+		cfg.Auth.TokenExpiry = "72h"
+	}
+	if cfg.Events.Mode == "" {
+		cfg.Events.Mode = "webhook"
+	}
+	if cfg.Git.WorkDir == "" {
+		cfg.Git.WorkDir = "/var/lib/asika/work"
+	}
+	if cfg.MergeQueue.RequiredApprovals == 0 {
+		cfg.MergeQueue.RequiredApprovals = 1
+		cfg.MergeQueue.CICheckRequired = true
 	}
 
-	// Ensure directory exists
-	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create config directory"})
+	if len(cfg.RepoGroups) == 0 {
+		cfg.RepoGroups = []models.RepoGroupConfig{
+			{
+				Name: "default",
+				Mode: "multi",
+			},
+		}
+	}
+
+	// Write config to file
+	if err := config.SaveToFile(cfg); err != nil {
+		slog.Error("wizard: failed to write config", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config file", "detail": err.Error()})
 		return
 	}
 
-	// Marshal to TOML
-	data, err := toml.Marshal(&cfg)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to marshal config"})
-		return
-	}
-
-	// Write to file
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config file"})
-		return
-	}
-
-	// Update in-memory config
+	// Store in memory so config.Current() returns non-nil
 	config.Store(&cfg)
 
-	slog.Info("wizard completed, config saved", "path", configPath)
-	c.JSON(http.StatusOK, gin.H{"message": "setup complete", "path": configPath})
+	// Ensure DB directory exists
+	dbDir := filepath.Dir(cfg.Database.Path)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		slog.Error("wizard: failed to create db directory", "dir", dbDir, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create database directory", "detail": err.Error()})
+		return
+	}
+
+	// Init database
+	if err := db.Init(cfg.Database.Path); err != nil {
+		slog.Error("wizard: failed to init database", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initialize database", "detail": err.Error()})
+		return
+	}
+
+	// Init auth
+	auth.Init(cfg.Auth.JWTSecret, config.GenerateTokenExpiry(cfg.Auth.TokenExpiry))
+
+	// Create admin users
+	for _, u := range payload.Users {
+		hash, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
+		if err != nil {
+			slog.Error("wizard: failed to hash password", "username", u.Username, "error", err)
+			continue
+		}
+		if u.Role == "" {
+			u.Role = "admin"
+		}
+		user := models.User{
+			Username:     u.Username,
+			PasswordHash: string(hash),
+			Role:         u.Role,
+			CreatedAt:    time.Now(),
+		}
+		data, err := json.Marshal(user)
+		if err != nil {
+			slog.Error("wizard: failed to marshal user", "username", u.Username, "error", err)
+			continue
+		}
+		if err := db.Put(db.BucketUsers, u.Username, data); err != nil {
+			slog.Error("wizard: failed to save user", "username", u.Username, "error", err)
+			continue
+		}
+		slog.Info("wizard: admin user created", "username", u.Username)
+	}
+
+	slog.Info("wizard: setup complete", "path", config.ConfigPath)
+	c.JSON(http.StatusOK, gin.H{"message": "setup complete", "path": config.ConfigPath})
 }

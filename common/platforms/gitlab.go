@@ -2,7 +2,6 @@ package platforms
 
 import (
 	"context"
-	"crypto/hmac"
 	"fmt"
 	"strings"
 	"time"
@@ -14,13 +13,14 @@ import (
 
 // GitLabClient implements PlatformClient for GitLab
 type GitLabClient struct {
-	client  *gitlab.Client
-	token   string
-	baseURL string
+	client        *gitlab.Client
+	token         string
+	baseURL       string
+	webhookSecret string
 }
 
 // NewGitLabClient creates a new GitLab client
-func NewGitLabClient(token string, baseURL string) *GitLabClient {
+func NewGitLabClient(token string, baseURL string, webhookSecret string) *GitLabClient {
 	var client *gitlab.Client
 	var err error
 
@@ -35,9 +35,10 @@ func NewGitLabClient(token string, baseURL string) *GitLabClient {
 	}
 
 	return &GitLabClient{
-		client:  client,
-		token:   token,
-		baseURL: baseURL,
+		client:        client,
+		token:         token,
+		baseURL:       baseURL,
+		webhookSecret: webhookSecret,
 	}
 }
 
@@ -290,6 +291,29 @@ func (c *GitLabClient) GetBranch(ctx context.Context, owner, repo, branch string
 	return true, nil
 }
 
+// ListBranches lists all branches in a project
+func (c *GitLabClient) ListBranches(ctx context.Context, owner, repo string) ([]string, error) {
+	project := owner + "/" + repo
+	opts := &gitlab.ListBranchesOptions{
+		ListOptions: gitlab.ListOptions{PerPage: 100},
+	}
+	var branches []string
+	for {
+		branchList, resp, err := c.client.Branches.ListBranches(project, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list branches: %w", err)
+		}
+		for _, b := range branchList {
+			branches = append(branches, b.Name)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return branches, nil
+}
+
 // DeleteBranch deletes a branch
 func (c *GitLabClient) DeleteBranch(ctx context.Context, owner, repo, branch string) error {
 	project := owner + "/" + repo
@@ -374,9 +398,12 @@ func (c *GitLabClient) GetApprovals(ctx context.Context, owner, repo string, num
 }
 
 // VerifyWebhookSignature verifies the webhook signature
-// GitLab uses a token-based verification (X-Gitlab-Token header)
+// GitLab uses X-GitLab-Token header, should match the configured webhook_secret
 func (c *GitLabClient) VerifyWebhookSignature(body []byte, signature string) bool {
-	return hmac.Equal([]byte(signature), []byte(c.token))
+	if c.webhookSecret == "" {
+		return false
+	}
+	return signature == c.webhookSecret
 }
 
 // GetPRCommits gets the commits in a MR

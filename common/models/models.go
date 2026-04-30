@@ -44,10 +44,10 @@ type PRRecord struct {
 
 // PREvent represents a pull request event
 type PREvent struct {
-    Timestamp time.Time `json:"timestamp"`
-    Action    string    `json:"action"` // "opened"|"closed"|"merged"|"approved"|"label_added"|"synced"|"cherry_picked"|"comment"|...
-    Actor     string    `json:"actor"`
-    Detail    string    `json:"detail"`
+	Timestamp time.Time `json:"timestamp"`
+	Action    string    `json:"action"` // "opened"|"closed"|"merged"|"approved"|"labeled"|"synced"|"cherry_picked"|"comment"|...
+	Actor     string    `json:"actor"`
+	Detail    string    `json:"detail"`
 }
 
 // QueueItem represents a merge queue item
@@ -105,13 +105,11 @@ type LabelRule struct {
 
 // SpamConfig represents spam detection configuration
 type SpamConfig struct {
-    Enabled                   bool     `json:"enabled" toml:"enabled"`
-    TimeWindow                string   `json:"time_window" toml:"time_window"`
-    Threshold                 int      `json:"threshold" toml:"threshold"`
-    TriggerOnAuthor           bool     `json:"trigger_on_author" toml:"trigger_on_author"`
-    TriggerOnSimilarTitle     bool     `json:"trigger_on_similar_title" toml:"trigger_on_similar_title"`
-    TitleSimilarityThreshold  float64  `json:"title_similarity_threshold" toml:"title_similarity_threshold"`
-    TriggerOnKeywords         []string `json:"trigger_on_keywords" toml:"trigger_on_title_kw"`
+	Enabled               bool     `json:"enabled" toml:"enabled"`
+	TimeWindow            string   `json:"time_window" toml:"time_window"`
+	Threshold             int      `json:"threshold" toml:"threshold"`
+	TriggerOnAuthor      bool     `json:"trigger_on_author" toml:"trigger_on_author"`
+	TriggerOnTitleKw     []string `json:"trigger_on_title_kw" toml:"trigger_on_title_kw"`
 }
 
 // NotifyConfig represents notification configuration
@@ -158,15 +156,16 @@ type TokensConfig struct {
 
 // RepoGroupConfig represents repository group configuration (TOML mapping)
 type RepoGroupConfig struct {
-    Name          string          `toml:"name"`
-    Mode          string          `toml:"mode"` // "multi" | "single", overrides global
-    GitHub        string          `toml:"github"`
-    GitLab        string          `toml:"gitlab"`
-    Gitea         string          `toml:"gitea"`
-    DefaultBranch string          `toml:"default_branch"`
-    HookPath      string          `toml:"hookpath"`
-    CIProvider    string          `toml:"ci_provider"`
-    MergeQueue    MergeQueueConfig `toml:"merge_queue"`
+	Name           string           `toml:"name" json:"name"`
+	Mode           string           `toml:"mode" json:"mode"`
+	MirrorPlatform string           `toml:"mirror_platform" json:"mirror_platform"`
+	GitHub         string           `toml:"github" json:"github"`
+	GitLab         string           `toml:"gitlab" json:"gitlab"`
+	Gitea          string           `toml:"gitea" json:"gitea"`
+	DefaultBranch  string           `toml:"default_branch" json:"default_branch"`
+	HookPath       string           `toml:"hookpath" json:"hookpath"`
+	CIProvider     string           `toml:"ci_provider" json:"ci_provider"`
+	MergeQueue     MergeQueueConfig `toml:"merge_queue" json:"merge_queue"`
 }
 
 // SingleRepoConfig represents single repository configuration
@@ -180,18 +179,17 @@ type SingleRepoConfig struct {
 
 // Config represents the main configuration structure
 type Config struct {
-    Server      ServerConfig      `toml:"server"`
-    Mode        string            `toml:"mode"` // "single" | "multi"
-    Database    DatabaseConfig    `toml:"database"`
-    Auth        AuthConfig        `toml:"auth"`
-    Notify      []NotifyConfig    `toml:"notify"`
-    Events      EventsConfig      `toml:"events"`
-    Git         GitConfig         `toml:"git"`
-    Tokens      TokensConfig      `toml:"tokens"`
-    LabelRules  []LabelRule       `toml:"label_rules"`
-    Spam        SpamConfig        `toml:"spam"`
-    MergeQueue  MergeQueueConfig  `toml:"merge_queue"`
-    HookPath    string            `toml:"hookpath"`
-    RepoGroups  []RepoGroupConfig `toml:"repo_groups"`
-    SingleRepo  SingleRepoConfig  `toml:"single_repo"`
+	Server      ServerConfig      `toml:"server" json:"server"`
+	Database    DatabaseConfig    `toml:"database" json:"database"`
+	Auth        AuthConfig        `toml:"auth" json:"auth"`
+	Notify      []NotifyConfig    `toml:"notify" json:"notify"`
+	Events      EventsConfig      `toml:"events" json:"events"`
+	Git         GitConfig         `toml:"git" json:"git"`
+	Tokens      TokensConfig      `toml:"tokens" json:"tokens"`
+	LabelRules  []LabelRule       `toml:"label_rules" json:"label_rules"`
+	Spam        SpamConfig        `toml:"spam" json:"spam"`
+	MergeQueue  MergeQueueConfig  `toml:"merge_queue" json:"merge_queue"`
+	HookPath    string            `toml:"hookpath" json:"hookpath"`
+	RepoGroups  []RepoGroupConfig `toml:"repo_groups" json:"repo_groups"`
+	SingleRepo  SingleRepoConfig  `toml:"single_repo" json:"single_repo"`
 }

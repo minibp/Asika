@@ -99,13 +99,18 @@ func (d *SpamDetector) detectSpam(prs []*models.PRRecord) []*models.PRRecord {
 		}
 	}
 
-	// Check by similar title
-	if d.cfg.Spam.TriggerOnSimilarTitle {
-		for i := 0; i < len(prs); i++ {
-			for j := i + 1; j < len(prs); j++ {
-				if d.isSimilarTitle(prs[i].Title, prs[j].Title) {
-					spamMap[prs[i].ID] = prs[i]
-					spamMap[prs[j].ID] = prs[j]
+	// Check by author (if enabled in config)
+	if d.cfg.Spam.TriggerOnAuthor {
+		authorCount := make(map[string]int)
+		for _, pr := range prs {
+			authorCount[pr.Author]++
+		}
+		for author, count := range authorCount {
+			if count >= d.cfg.Spam.Threshold {
+				for _, pr := range prs {
+					if pr.Author == author {
+						spamMap[pr.ID] = pr
+					}
 				}
 			}
 		}
@@ -113,7 +118,7 @@ func (d *SpamDetector) detectSpam(prs []*models.PRRecord) []*models.PRRecord {
 
 	// Check by keywords in title
 	for _, pr := range prs {
-		for _, keyword := range d.cfg.Spam.TriggerOnKeywords {
+		for _, keyword := range d.cfg.Spam.TriggerOnTitleKw {
 			if strings.Contains(strings.ToLower(pr.Title), strings.ToLower(keyword)) {
 				spamMap[pr.ID] = pr
 				break
@@ -126,39 +131,6 @@ func (d *SpamDetector) detectSpam(prs []*models.PRRecord) []*models.PRRecord {
 		result = append(result, pr)
 	}
 	return result
-}
-
-// isSimilarTitle checks if two titles are similar enough
-func (d *SpamDetector) isSimilarTitle(title1, title2 string) bool {
-	lower1 := strings.ToLower(title1)
-	lower2 := strings.ToLower(title2)
-
-	// Simple containment check
-	if strings.Contains(lower1, lower2) || strings.Contains(lower2, lower1) {
-		return true
-	}
-
-	// Character-level Jaccard similarity
-	set1 := make(map[rune]bool)
-	set2 := make(map[rune]bool)
-	for _, c := range lower1 {
-		set1[c] = true
-	}
-	for _, c := range lower2 {
-		set2[c] = true
-	}
-
-	intersection := 0
-	for c := range set1 {
-		if set2[c] {
-			intersection++
-		}
-	}
-	union := len(set1) + len(set2) - intersection
-	if union == 0 {
-		return false
-	}
-	return float64(intersection)/float64(union) >= d.cfg.Spam.TitleSimilarityThreshold
 }
 
 // HandleSpam marks a PR as spam, closes it via platform API, and sends notifications

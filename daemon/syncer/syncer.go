@@ -34,11 +34,6 @@ func NewSyncer(cfg *models.Config, clients map[platforms.PlatformType]platforms.
 
 // SyncOnMerge handles a merge event and syncs to other platforms
 func (s *Syncer) SyncOnMerge(ctx context.Context, pr *models.PRRecord) error {
-	if s.cfg.Mode != "multi" {
-		slog.Info("skipping sync: not in multi mode")
-		return nil
-	}
-
 	group := config.GetRepoGroupByName(s.cfg, pr.RepoGroup)
 	if group == nil {
 		return fmt.Errorf("repo group not found: %s", pr.RepoGroup)

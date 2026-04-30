@@ -1,12 +1,13 @@
 package server
 
 import (
-    "log/slog"
-    "net/http"
-    "time"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
 
-    "github.com/gin-gonic/gin"
-    "asika/common/auth"
+	"github.com/gin-gonic/gin"
+	"asika/common/auth"
 )
 
 // Logger is a custom logger middleware
@@ -32,26 +33,40 @@ func Logger() gin.HandlerFunc {
 
 // AuthMiddleware creates an authentication middleware
 func AuthMiddleware() gin.HandlerFunc {
-    return func(c *gin.Context) {
-        // Skip auth for login, wizard, and health check
-        path := c.Request.URL.Path
-        if path == "/api/v1/login" || 
-           path == "/health" || 
-           (len(path) >= 12 && path[:12] == "/api/v1/wizard") {
-            c.Next()
-            return
-        }
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
 
-        token := extractToken(c)
-        if token == "" {
-            c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token", "code": 401})
-            c.Abort()
-            return
-        }
+		skipPaths := []string{"/api/v1/auth", "/api/v1/wizard", "/login", "/wizard"}
+		skip := false
+		for _, p := range skipPaths {
+			if strings.HasPrefix(path, p) {
+				skip = true
+				break
+			}
+		}
+		if path == "/health" || skip {
+			c.Next()
+			return
+		}
+
+		token := extractToken(c)
+		if token == "" {
+			if strings.HasPrefix(path, "/api/") {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token", "code": 401})
+			} else {
+				c.Redirect(http.StatusFound, "/login")
+			}
+			c.Abort()
+			return
+		}
 
         claims, err := auth.ValidateJWT(token)
         if err != nil {
-            c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "code": 401})
+            if strings.HasPrefix(path, "/api/") {
+                c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "code": 401})
+            } else {
+                c.Redirect(http.StatusFound, "/login")
+            }
             c.Abort()
             return
         }
@@ -77,7 +92,18 @@ func RequireAuth() gin.HandlerFunc {
     }
 }
 
-// RequireRole requires a specific role
+// SSRAuthRequired redirects to login if not authenticated (for browser pages)
+func SSRAuthRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		username, exists := c.Get("username")
+		if !exists || username == nil || username.(string) == "" {
+			c.Redirect(http.StatusFound, "/login")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
 func RequireRole(role string) gin.HandlerFunc {
     return func(c *gin.Context) {
         userRole, exists := c.Get("role")
@@ -119,19 +145,19 @@ func RequireAnyRole(roles ...string) gin.HandlerFunc {
     }
 }
 
-// extractToken extracts the JWT token from the Authorization header
+// extractToken extracts the JWT token from Authorization header or cookie
 func extractToken(c *gin.Context) string {
-    authHeader := c.GetHeader("Authorization")
-    if authHeader == "" {
-        return ""
-    }
-
-    parts := splitToken(authHeader)
-    if len(parts) != 2 {
-        return ""
-    }
-
-    return parts[1]
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		parts := splitToken(authHeader)
+		if len(parts) == 2 {
+			return parts[1]
+		}
+	}
+	if token, err := c.Cookie("asika_token"); err == nil {
+		return token
+	}
+	return ""
 }
 
 // splitToken splits the Authorization header into parts

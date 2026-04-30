@@ -1,6 +1,14 @@
-{{define "title"}}Dashboard - Asika{{end}}
-{{template "layout.html" .}}
-{{define "content"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "styles"}}
+    <title>{{.title}}</title>
+</head>
+<body>
+{{template "header" .}}
+<div class="container">
 <h1>Dashboard</h1>
 <div class="stats">
     <div class="stat-card">
@@ -20,6 +28,8 @@
     <h2>Recent Activity</h2>
     <div id="activity">Loading...</div>
 </div>
+</div>
+{{template "scripts"}}
 <script>
     async function loadDashboard() {
         try {
@@ -40,4 +50,6 @@
     }
     loadDashboard();
 </script>
-{{end}}
+{{template "client_auth"}}
+</body>
+</html>

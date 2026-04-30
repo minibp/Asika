@@ -1,22 +1,23 @@
 package main
 
 import (
-    "log/slog"
-    "os"
-    "os/signal"
-    "syscall"
-    "time"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-    "asika/common/auth"
-    "asika/common/config"
-    "asika/common/db"
-    "asika/common/events"
-    "asika/common/platforms"
-    "asika/daemon/consumer"
-    "asika/daemon/polling"
-    "asika/daemon/queue"
-    "asika/daemon/server"
-    "asika/daemon/syncer"
+	"asika/common/auth"
+	"asika/common/config"
+	"asika/common/db"
+	"asika/common/events"
+	"asika/common/platforms"
+	"asika/daemon/consumer"
+	"asika/daemon/handlers"
+	"asika/daemon/polling"
+	"asika/daemon/queue"
+	"asika/daemon/server"
+	"asika/daemon/syncer"
 )
 
 func main() {
@@ -31,7 +32,7 @@ func main() {
     // If config doesn't exist, start server in initialization mode
     if err != nil {
         slog.Warn("config not found, starting in initialization mode", "error", err)
-        srv := server.NewServer(nil)
+        srv := server.NewServer(nil, nil)
         slog.Info("asikad starting in initialization mode")
         if err := srv.Start(); err != nil {
             slog.Error("server failed", "error", err)
@@ -50,18 +51,18 @@ func main() {
     // Initialize auth
     auth.Init(cfg.Auth.JWTSecret, config.GenerateTokenExpiry(cfg.Auth.TokenExpiry))
 
-    // Create platform clients
-    clients := make(map[platforms.PlatformType]platforms.PlatformClient)
+	// Create platform clients
+	clients := make(map[platforms.PlatformType]platforms.PlatformClient)
 
-    if cfg.Tokens.GitHub != "" {
-        clients[platforms.PlatformGitHub] = platforms.NewGitHubClient(cfg.Tokens.GitHub)
-    }
-    if cfg.Tokens.GitLab != "" {
-        clients[platforms.PlatformGitLab] = platforms.NewGitLabClient(cfg.Tokens.GitLab, "")
-    }
-    if cfg.Tokens.Gitea != "" {
-        clients[platforms.PlatformGitea] = platforms.NewGiteaClient("https://gitea.example.com", cfg.Tokens.Gitea)
-    }
+	if cfg.Tokens.GitHub != "" {
+		clients[platforms.PlatformGitHub] = platforms.NewGitHubClient(cfg.Tokens.GitHub, cfg.Events.WebhookSecret)
+	}
+	if cfg.Tokens.GitLab != "" {
+		clients[platforms.PlatformGitLab] = platforms.NewGitLabClient(cfg.Tokens.GitLab, "", cfg.Events.WebhookSecret)
+	}
+	if cfg.Tokens.Gitea != "" {
+		clients[platforms.PlatformGitea] = platforms.NewGiteaClient("https://gitea.example.com", cfg.Tokens.Gitea, cfg.Events.WebhookSecret)
+	}
 
     // Initialize event bus
     events.Init()
@@ -74,15 +75,16 @@ func main() {
         platforms.ExitOnCheckFailed(err)
     }
 
-    // Start merge queue manager and periodic checker
-    queueMgr := queue.NewManager(cfg, clients)
-    go func() {
-        ticker := time.NewTicker(30 * time.Second)
-        for range ticker.C {
-            queueMgr.CheckQueue()
-        }
-    }()
-    slog.Info("merge queue checker started")
+	// Start merge queue manager and periodic checker
+	queueMgr := queue.NewManager(cfg, clients)
+	handlers.InitQueueMgr(queueMgr)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		for range ticker.C {
+			queueMgr.CheckQueue()
+		}
+	}()
+	slog.Info("merge queue checker started")
 
     // Start spam detector periodic scan
     spamDetector := syncer.NewSpamDetectorWithClients(cfg, clients)
@@ -110,14 +112,15 @@ func main() {
     go eventConsumer.Start()
     slog.Info("event consumer started")
 
-    // Create and start server
-    srv := server.NewServer(cfg)
+	// Create and start server
+	srv := server.NewServer(cfg, clients)
 
-    slog.Info("asikad starting")
-    if err := srv.Start(); err != nil {
-        slog.Error("server failed", "error", err)
-        os.Exit(1)
-    }
+	slog.Info("Asika daemon starting")
+	slog.Info("Copyright (R) 2026 The minibp developers. All rights reserved")
+	if err := srv.Start(); err != nil {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
 }
 
 // setupSIGHUPHandler sets up SIGHUP signal handler for hot reload

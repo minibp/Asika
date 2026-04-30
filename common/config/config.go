@@ -1,17 +1,18 @@
 package config
 
 import (
-    "fmt"
-    "log/slog"
-    "os"
-    "strings"
-    "sync/atomic"
-    "time"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"time"
 
-    "github.com/BurntSushi/toml"
-    "github.com/google/uuid"
+	"github.com/BurntSushi/toml"
+	"github.com/google/uuid"
 
-    "asika/common/models"
+	"asika/common/models"
 )
 
 var (
@@ -40,17 +41,16 @@ func Load(path string) (*models.Config, error) {
         return nil, fmt.Errorf("failed to read config file: %w", err)
     }
 
-    cfg := &models.Config{
-        Mode: "multi",
-        Server: models.ServerConfig{
-            Listen: ":8080",
-            Mode:   "release",
-        },
-        MergeQueue: models.MergeQueueConfig{
-            RequiredApprovals: 1,
-            CICheckRequired:   true,
-        },
-    }
+	cfg := &models.Config{
+		Server: models.ServerConfig{
+			Listen: ":8080",
+			Mode:   "release",
+		},
+		MergeQueue: models.MergeQueueConfig{
+			RequiredApprovals: 1,
+			CICheckRequired:   true,
+		},
+	}
 
     if err := toml.Unmarshal(data, cfg); err != nil {
         return nil, fmt.Errorf("failed to parse config file: %w", err)
@@ -79,73 +79,62 @@ func Load(path string) (*models.Config, error) {
 
 // validate validates the configuration
 func validate(cfg *models.Config) error {
-    if cfg.Mode != "single" && cfg.Mode != "multi" {
-        return fmt.Errorf("invalid mode: %s (must be 'single' or 'multi')", cfg.Mode)
-    }
+	// Check repo groups
+	if len(cfg.RepoGroups) == 0 {
+		return fmt.Errorf("at least one repo_groups entry is required")
+	}
 
-    if cfg.Mode == "multi" && len(cfg.RepoGroups) == 0 {
-        return fmt.Errorf("multi mode requires at least one repo_groups entry")
-    }
+	for _, rg := range cfg.RepoGroups {
+		if rg.Mode != "single" && rg.Mode != "multi" && rg.Mode != "" {
+			return fmt.Errorf("invalid mode for repo group %s: %s (must be 'single' or 'multi')", rg.Name, rg.Mode)
+		}
+		mode := rg.Mode
+		if mode == "" {
+			mode = "multi" // default
+		}
+		if mode == "single" {
+			if rg.GitHub == "" && rg.GitLab == "" && rg.Gitea == "" {
+				return fmt.Errorf("single mode repo group %s requires at least one platform repo to be set", rg.Name)
+			}
+			if rg.MirrorPlatform == "" {
+				return fmt.Errorf("single mode repo group %s requires mirror_platform to be set", rg.Name)
+			}
+		}
+	}
 
-    if cfg.Mode == "single" {
-        if cfg.SingleRepo.Repo == "" {
-            return fmt.Errorf("single mode requires single_repo.repo to be set")
-        }
-        if cfg.SingleRepo.Platform == "" {
-            return fmt.Errorf("single mode requires single_repo.platform to be set")
-        }
-    }
+	if cfg.Database.Path == "" {
+		return fmt.Errorf("database.path is required")
+	}
 
-    if cfg.Database.Path == "" {
-        return fmt.Errorf("database.path is required")
-    }
+	if cfg.Auth.JWTSecret == "" {
+		return fmt.Errorf("auth.jwt_secret is required")
+	}
 
-    if cfg.Auth.JWTSecret == "" {
-        return fmt.Errorf("auth.jwt_secret is required")
-    }
-
-    return nil
+	return nil
 }
 
-// GetRepoGroups returns all repo groups based on mode
+// GetRepoGroups returns all repo groups
 func GetRepoGroups(cfg *models.Config) []models.RepoGroup {
-    if cfg.Mode == "single" {
-        return []models.RepoGroup{
-            {
-                Name:           "default",
-                Mode:           "single",
-                MirrorPlatform: cfg.SingleRepo.Platform,
-                GitHub:         cfg.SingleRepo.Repo,
-                GitLab:         cfg.SingleRepo.Repo,
-                Gitea:          cfg.SingleRepo.Repo,
-                DefaultBranch:  cfg.SingleRepo.DefaultBranch,
-                HookPath:       cfg.SingleRepo.HookPath,
-                CIProvider:     cfg.SingleRepo.CIProvider,
-                MergeQueue:     cfg.MergeQueue,
-            },
-        }
-    }
-
-    groups := make([]models.RepoGroup, len(cfg.RepoGroups))
-    for i, rg := range cfg.RepoGroups {
-        mode := rg.Mode
-        if mode == "" {
-            mode = cfg.Mode
-        }
-        groups[i] = models.RepoGroup{
-            Name:           rg.Name,
-            Mode:           mode,
-            MirrorPlatform: "",
-            GitHub:         rg.GitHub,
-            GitLab:         rg.GitLab,
-            Gitea:          rg.Gitea,
-            DefaultBranch:  rg.DefaultBranch,
-            HookPath:       rg.HookPath,
-            CIProvider:     rg.CIProvider,
-            MergeQueue:     rg.MergeQueue,
-        }
-    }
-    return groups
+	groups := make([]models.RepoGroup, len(cfg.RepoGroups))
+	for i, rg := range cfg.RepoGroups {
+		mode := rg.Mode
+		if mode == "" {
+			mode = "multi" // default
+		}
+		groups[i] = models.RepoGroup{
+			Name:           rg.Name,
+			Mode:           mode,
+			MirrorPlatform: rg.MirrorPlatform,
+			GitHub:         rg.GitHub,
+			GitLab:         rg.GitLab,
+			Gitea:          rg.Gitea,
+			DefaultBranch:  rg.DefaultBranch,
+			HookPath:       rg.HookPath,
+			CIProvider:     rg.CIProvider,
+			MergeQueue:     rg.MergeQueue,
+		}
+	}
+	return groups
 }
 
 // GetRepoGroupByName finds a repo group by name
@@ -193,4 +182,33 @@ func GenerateTokenExpiry(expiry string) time.Duration {
 // GenerateUUID generates a new UUID string
 func GenerateUUID() string {
     return uuid.New().String()
+}
+
+// SaveToFile writes the config to the configured file path
+func SaveToFile(cfg models.Config) error {
+	path := ConfigPath
+	if path == "" {
+		path = os.Getenv("ASIKA_CONFIG")
+		if path == "" {
+			path = "/etc/asika_config.toml"
+		}
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to create config file: %w", err)
+	}
+	defer f.Close()
+
+	if err := toml.NewEncoder(f).Encode(cfg); err != nil {
+		return fmt.Errorf("failed to encode config: %w", err)
+	}
+
+	ConfigPath = path
+	return nil
 }

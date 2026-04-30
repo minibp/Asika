@@ -5,13 +5,13 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"asika/common/config"
 	"asika/common/models"
+	"asika/common/platforms"
 	"asika/daemon/handlers"
 	"asika/daemon/templates"
 )
@@ -19,11 +19,12 @@ import (
 // Server represents the HTTP server
 type Server struct {
 	engine *gin.Engine
-	cfg    *models.Config
+	cfg     *models.Config
+	clients map[platforms.PlatformType]platforms.PlatformClient
 }
 
 // NewServer creates a new server instance
-func NewServer(cfg *models.Config) *Server {
+func NewServer(cfg *models.Config, clients map[platforms.PlatformType]platforms.PlatformClient) *Server {
 	if cfg != nil && cfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -38,9 +39,13 @@ func NewServer(cfg *models.Config) *Server {
 	engine.SetHTMLTemplate(t)
 
 	s := &Server{
-		cfg:    cfg,
-		engine: engine,
+		cfg:     cfg,
+		engine:  engine,
+		clients: clients,
 	}
+
+	// Initialize handlers with clients
+	handlers.InitClients(clients)
 
 	s.setupMiddleware()
 	s.setupRoutes()
@@ -53,22 +58,24 @@ func initCheckMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 
-		// Skip check for wizard, login, and health paths
-		if strings.HasPrefix(path, "/wizard") ||
-			strings.HasPrefix(path, "/api/v1/auth") ||
-			strings.HasPrefix(path, "/login") ||
-			path == "/health" {
+		// Skip check for wizard, login, auth, and health paths
+		skip := false
+		skipPaths := []string{"/wizard", "/api/v1/wizard", "/api/v1/auth", "/login", "/health"}
+		for _, p := range skipPaths {
+			if strings.HasPrefix(path, p) {
+				skip = true
+				break
+			}
+		}
+
+		if skip {
+			slog.Info("initCheckMiddleware: skipping", "path", path)
 			c.Next()
 			return
 		}
 
-		// Check if config exists
-		configPath := os.Getenv("ASIKA_CONFIG")
-		if configPath == "" {
-			configPath = "/etc/asika_config.toml"
-		}
-
-		if !config.IsInitialized(configPath) {
+		// Check if config is loaded (atomic.Value), not just file existence
+		if config.Current() == nil {
 			if strings.HasPrefix(path, "/api/") {
 				c.JSON(http.StatusServiceUnavailable, gin.H{
 					"error": "server not initialized",
@@ -90,10 +97,7 @@ func (s *Server) setupMiddleware() {
 	s.engine.Use(initCheckMiddleware())
 	s.engine.Use(Logger())
 	s.engine.Use(gin.Recovery())
-
-	if s.cfg != nil {
-		s.engine.Use(AuthMiddleware())
-	}
+	s.engine.Use(AuthMiddleware())
 }
 
 // setupRoutes configures routes according to tasks.md section 8
@@ -186,7 +190,11 @@ func (s *Server) setupRoutes() {
 
 	// WebUI routes - server-rendered (SSR) per tasks.md 2.3
 	s.engine.GET("/", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "index.html", gin.H{"title": "Asika PR Manager"})
+		if config.Current() != nil {
+			c.Redirect(http.StatusFound, "/login")
+		} else {
+			c.Redirect(http.StatusFound, "/wizard")
+		}
 	})
 
 	s.engine.GET("/wizard", func(c *gin.Context) {
@@ -197,54 +205,51 @@ func (s *Server) setupRoutes() {
 		c.HTML(http.StatusOK, "login.html", gin.H{"title": "Login - Asika"})
 	})
 
-	s.engine.GET("/dashboard", func(c *gin.Context) {
-		user := c.GetString("username")
-		c.HTML(http.StatusOK, "dashboard.html", gin.H{
-			"title":          "Dashboard - Asika",
-			"authenticated": true,
-			"username":       user,
+	ssr := s.engine.Group("")
+	ssr.Use(SSRAuthRequired())
+	{
+		ssr.GET("/dashboard", func(c *gin.Context) {
+			user := c.GetString("username")
+			c.HTML(http.StatusOK, "dashboard.html", gin.H{
+				"title":    "Dashboard - Asika",
+				"username": user,
+			})
 		})
-	})
 
-	s.engine.GET("/prs", func(c *gin.Context) {
-		user := c.GetString("username")
-		c.HTML(http.StatusOK, "pr_list.html", gin.H{
-			"title":          "PRs - Asika",
-			"authenticated": true,
-			"username":       user,
-			"repo_group":     "main",
+		ssr.GET("/prs", func(c *gin.Context) {
+			user := c.GetString("username")
+			c.HTML(http.StatusOK, "pr_list.html", gin.H{
+				"title":    "PRs - Asika",
+				"username": user,
+			})
 		})
-	})
 
-	s.engine.GET("/prs/:pr_id", func(c *gin.Context) {
-		user := c.GetString("username")
-		c.HTML(http.StatusOK, "pr_detail.html", gin.H{
-			"title":          "PR Detail - Asika",
-			"authenticated": true,
-			"username":       user,
-			"repo_group":     "main",
-			"pr_id":          c.Param("pr_id"),
+		ssr.GET("/prs/:pr_id", func(c *gin.Context) {
+			user := c.GetString("username")
+			c.HTML(http.StatusOK, "pr_detail.html", gin.H{
+				"title":      "PR Detail - Asika",
+				"username":   user,
+				"repo_group": "main",
+				"pr_id":      c.Param("pr_id"),
+			})
 		})
-	})
 
-	s.engine.GET("/queue", func(c *gin.Context) {
-		user := c.GetString("username")
-		c.HTML(http.StatusOK, "queue.html", gin.H{
-			"title":          "Queue - Asika",
-			"authenticated": true,
-			"username":       user,
-			"repo_group":     "main",
+		ssr.GET("/queue", func(c *gin.Context) {
+			user := c.GetString("username")
+			c.HTML(http.StatusOK, "queue.html", gin.H{
+				"title":    "Queue - Asika",
+				"username": user,
+			})
 		})
-	})
 
-	s.engine.GET("/config", func(c *gin.Context) {
-		user := c.GetString("username")
-		c.HTML(http.StatusOK, "config.html", gin.H{
-			"title":          "Config - Asika",
-			"authenticated": true,
-			"username":       user,
+		ssr.GET("/config", func(c *gin.Context) {
+			user := c.GetString("username")
+			c.HTML(http.StatusOK, "config.html", gin.H{
+				"title":    "Config - Asika",
+				"username": user,
+			})
 		})
-	})
+	}
 
 	// Webhook routes (no auth)
 	s.engine.POST("/webhook/:repo_group/:platform", handlers.WebhookHandler)

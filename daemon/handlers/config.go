@@ -76,7 +76,7 @@ func UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	// Apply hot-reloadable items only
+	// Apply hot-reloadable items only (tasks.md 3.3)
 	if labelRules, ok := patch["label_rules"]; ok {
 		existing["label_rules"] = labelRules
 	}
@@ -85,6 +85,17 @@ func UpdateConfig(c *gin.Context) {
 	}
 	if spam, ok := patch["spam"]; ok {
 		existing["spam"] = spam
+	}
+	// core_contributors is inside merge_queue config
+	if mq, ok := patch["merge_queue"].(map[string]interface{}); ok {
+		if cc, ok := mq["core_contributors"].([]interface{}); ok {
+			if existingMQ, ok := existing["merge_queue"].(map[string]interface{}); ok {
+				existingMQ["core_contributors"] = cc
+			}
+		}
+	}
+	if hookpath, ok := patch["hookpath"]; ok {
+		existing["hookpath"] = hookpath
 	}
 
 	// Write back

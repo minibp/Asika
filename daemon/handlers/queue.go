@@ -6,11 +6,21 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"log/slog"
 
 	"asika/common/config"
 	"asika/common/db"
 	"asika/common/models"
+	"asika/daemon/queue"
 )
+
+// queueMgr is a package-level variable to access the queue manager
+var queueMgr *queue.Manager
+
+// InitQueueMgr initializes the queue manager for handlers
+func InitQueueMgr(mgr *queue.Manager) {
+	queueMgr = mgr
+}
 
 // GetQueue handles GET /api/v1/queue/:repo_group (8.3)
 func GetQueue(c *gin.Context) {
@@ -55,6 +65,14 @@ func RecheckQueue(c *gin.Context) {
 		return
 	}
 
-	// Trigger queue recheck - in real implementation, this would notify the queue manager
+	if queueMgr == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "queue manager not initialized"})
+		return
+	}
+
+	// Trigger queue recheck
+	go queueMgr.CheckQueue()
+	slog.Info("queue recheck triggered", "repo_group", repoGroup)
+
 	c.JSON(http.StatusOK, gin.H{"message": "queue recheck triggered"})
 }

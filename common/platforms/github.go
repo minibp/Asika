@@ -15,15 +15,17 @@ import (
 
 // GitHubClient implements PlatformClient for GitHub
 type GitHubClient struct {
-	client *github.Client
-	token  string
+	client        *github.Client
+	token         string
+	webhookSecret string
 }
 
 // NewGitHubClient creates a new GitHub client
-func NewGitHubClient(token string) *GitHubClient {
+func NewGitHubClient(token string, webhookSecret string) *GitHubClient {
 	return &GitHubClient{
-		client: github.NewTokenClient(context.Background(), token),
-		token:  token,
+		client:        github.NewTokenClient(context.Background(), token),
+		token:         token,
+		webhookSecret: webhookSecret,
 	}
 }
 
@@ -192,6 +194,26 @@ func (c *GitHubClient) GetBranch(ctx context.Context, owner, repo, branch string
 	return true, nil
 }
 
+// ListBranches lists all branches in a repository
+func (c *GitHubClient) ListBranches(ctx context.Context, owner, repo string) ([]string, error) {
+	opts := &github.ListOptions{PerPage: 100}
+	var branches []string
+	for {
+		branchList, resp, err := c.client.Repositories.ListBranches(ctx, owner, repo, &github.BranchListOptions{ListOptions: *opts})
+		if err != nil {
+			return nil, fmt.Errorf("failed to list branches: %w", err)
+		}
+		for _, b := range branchList {
+			branches = append(branches, b.GetName())
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return branches, nil
+}
+
 // DeleteBranch deletes a branch
 func (c *GitHubClient) DeleteBranch(ctx context.Context, owner, repo, branch string) error {
 	_, err := c.client.Git.DeleteRef(ctx, owner, repo, "heads/"+branch)
@@ -288,11 +310,11 @@ func (c *GitHubClient) GetApprovals(ctx context.Context, owner, repo string, num
 
 // VerifyWebhookSignature verifies the webhook signature using HMAC-SHA256
 func (c *GitHubClient) VerifyWebhookSignature(body []byte, signature string) bool {
-	if c.token == "" {
+	if c.webhookSecret == "" {
 		return false
 	}
 
-	mac := hmac.New(sha256.New, []byte(c.token))
+	mac := hmac.New(sha256.New, []byte(c.webhookSecret))
 	mac.Write(body)
 	expectedMAC := hex.EncodeToString(mac.Sum(nil))
 

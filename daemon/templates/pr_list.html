@@ -1,6 +1,14 @@
-{{define "title"}}PRs - Asika{{end}}
-{{template "layout.html" .}}
-{{define "content"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "styles"}}
+    <title>{{.title}}</title>
+</head>
+<body>
+{{template "header" .}}
+<div class="container">
 <h1>PR List</h1>
 <div class="form-group">
     <label>Filter by state:</label>
@@ -29,56 +37,25 @@
         </tbody>
     </table>
 </div>
+</div>
+{{template "scripts"}}
 <script>
     async function loadPRs() {
         const state = document.getElementById('stateFilter').value;
         const tbody = document.getElementById('prTableBody');
         tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Loading...</td></tr>';
-
         try {
             const resp = await apiRequest('/api/v1/repos/main/prs' + (state ? '?state=' + state : ''));
-            if (!resp.ok) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: red;">Failed to load PRs</td></tr>';
-                return;
-            }
+            if (!resp.ok) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: red;">Failed to load PRs</td></tr>'; return; }
             const prs = await resp.json();
-            if (prs.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No PRs found</td></tr>';
-                return;
-            }
-            tbody.innerHTML = prs.map(pr => `
-                <tr>
-                    <td>${pr.pr_number}</td>
-                    <td><a href="/prs/${pr.pr_number}" style="color: #0066cc; text-decoration: none;">${pr.title}</a></td>
-                    <td>${pr.author}</td>
-                    <td>${pr.platform}</td>
-                    <td class="status-${pr.state}">${pr.state}</td>
-                    <td>${(pr.labels || []).map(l => '<span class="label">' + l + '</span>').join('')}</td>
-                    <td>
-                        ${pr.state === 'open' ? `
-                            <button class="btn btn-success" onclick="approvePR(${pr.pr_number})" style="padding: 4px 8px; font-size: 12px;">Approve</button>
-                            <button class="btn btn-danger" onclick="closePR(${pr.pr_number})" style="padding: 4px 8px; font-size: 12px;">Close</button>
-                        ` : ''}
-                    </td>
-                </tr>
-            `).join('');
-        } catch (e) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: red;">Error: ' + e.message + '</td></tr>';
-        }
+            if (prs.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No PRs found</td></tr>'; return; }
+            tbody.innerHTML = prs.map(pr => '<tr><td>'+pr.pr_number+'</td><td><a href="/prs/'+pr.pr_number+'" style="color: #0066cc; text-decoration: none;">'+pr.title+'</a></td><td>'+pr.author+'</td><td>'+pr.platform+'</td><td class="status-'+pr.state+'">'+pr.state+'</td><td>'+(pr.labels||[]).map(l=>'<span class="label">'+l+'</span>').join('')+'</td><td>'+(pr.state==='open'?'<button class="btn btn-success" onclick="approvePR('+pr.pr_number+')" style="padding: 4px 8px; font-size: 12px;">Approve</button> <button class="btn btn-danger" onclick="closePR('+pr.pr_number+')" style="padding: 4px 8px; font-size: 12px;">Close</button>':'')+'</td></tr>').join('');
+        } catch (e) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: red;">Error: ' + e.message + '</td></tr>'; }
     }
-
-    async function approvePR(prNumber) {
-        if (!confirm('Approve PR #' + prNumber + '?')) return;
-        const resp = await apiRequest('/api/v1/repos/main/prs/' + prNumber + '/approve', { method: 'POST' });
-        if (resp.ok) { alert('PR approved!'); loadPRs(); } else { alert('Failed!'); }
-    }
-
-    async function closePR(prNumber) {
-        if (!confirm('Close PR #' + prNumber + '?')) return;
-        const resp = await apiRequest('/api/v1/repos/main/prs/' + prNumber + '/close', { method: 'POST' });
-        if (resp.ok) { alert('PR closed!'); loadPRs(); } else { alert('Failed!'); }
-    }
-
+    async function approvePR(n) { if(confirm('Approve PR #'+n+'?')){ await apiRequest('/api/v1/repos/main/prs/'+n+'/approve',{method:'POST'}); loadPRs(); } }
+    async function closePR(n) { if(confirm('Close PR #'+n+'?')){ await apiRequest('/api/v1/repos/main/prs/'+n+'/close',{method:'POST'}); loadPRs(); } }
     loadPRs();
 </script>
-{{end}}
+{{template "client_auth"}}
+</body>
+</html>

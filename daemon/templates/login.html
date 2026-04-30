@@ -48,6 +48,18 @@
                         password: document.getElementById('password').value
                     })
                 });
+                if (!resp.ok) {
+                    let errorText = 'Login failed (HTTP ' + resp.status + ')';
+                    try {
+                        const data = await resp.json();
+                        errorText = data.error || errorText;
+                    } catch (e) {
+                        // Response might be empty or not JSON
+                    }
+                    errorMsg.textContent = errorText;
+                    errorMsg.style.display = 'block';
+                    return;
+                }
                 const data = await resp.json();
                 if (data.token) {
                     localStorage.setItem('token', data.token);

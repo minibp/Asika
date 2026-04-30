@@ -110,7 +110,15 @@
                 <label>Group Name:</label>
                 <input type="text" id="group_name" value="default">
             </div>
-            <div class="form-group">
+            <div id="mirrorPlatformGroup" class="form-group" style="display:none;">
+                <label>Mirror Platform (single mode):</label>
+                <select id="mirror_platform">
+                    <option value="github">GitHub</option>
+                    <option value="gitlab">GitLab</option>
+                    <option value="gitea">Gitea</option>
+                </select>
+            </div>
+            <div id="githubRepoGroup" class="form-group">
                 <label>GitHub Repository (owner/repo):</label>
                 <input type="text" id="github_repo" placeholder="e.g., octocat/hello-world">
             </div>
@@ -173,12 +181,15 @@
             const mode = document.getElementById('mode').value;
             const gitlabGroup = document.getElementById('gitlabRepoGroup');
             const giteaGroup = document.getElementById('giteaRepoGroup');
+            const mirrorGroup = document.getElementById('mirrorPlatformGroup');
             if (mode === 'single') {
                 gitlabGroup.style.display = 'none';
                 giteaGroup.style.display = 'none';
+                mirrorGroup.style.display = 'block';
             } else {
                 gitlabGroup.style.display = 'block';
                 giteaGroup.style.display = 'block';
+                mirrorGroup.style.display = 'none';
             }
         }
 
@@ -260,13 +271,15 @@
                 repo_groups: [{
                     name: document.getElementById('group_name').value,
                     mode: mode,
+                    mirror_platform: mode === 'single' ? document.getElementById('mirror_platform').value : '',
                     github: document.getElementById('github_repo').value,
                     gitlab: document.getElementById('gitlab_repo').value,
                     gitea: document.getElementById('gitea_repo').value,
                     default_branch: document.getElementById('default_branch').value,
                     merge_queue: {
                         required_approvals: 1,
-                        ci_check_required: true
+                        ci_check_required: true,
+                        core_contributors: []
                     }
                 }],
                 users: [{

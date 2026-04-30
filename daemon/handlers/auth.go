@@ -55,6 +55,13 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	// Set cookie for SSR page auth (browser navigations don't send Authorization header)
+	c.SetCookie(
+		"asika_token", token,
+		int(config.GenerateTokenExpiry(cfg.Auth.TokenExpiry).Seconds()),
+		"/", "", false, true,
+	)
+
 	c.JSON(http.StatusOK, gin.H{"token": token, "username": user.Username, "role": user.Role})
 }
 

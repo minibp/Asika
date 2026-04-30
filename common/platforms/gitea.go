@@ -15,22 +15,24 @@ import (
 
 // GiteaClient implements PlatformClient for Gitea/Forgejo
 type GiteaClient struct {
-	client  *gitea.Client
-	token   string
-	baseURL string
+	client        *gitea.Client
+	token         string
+	baseURL       string
+	webhookSecret string
 }
 
 // NewGiteaClient creates a new Gitea client
-func NewGiteaClient(baseURL, token string) *GiteaClient {
+func NewGiteaClient(baseURL, token string, webhookSecret string) *GiteaClient {
 	client, err := gitea.NewClient(baseURL, gitea.SetToken(token))
 	if err != nil {
 		client, _ = gitea.NewClient(baseURL, gitea.SetToken(token))
 	}
 
 	return &GiteaClient{
-		client:  client,
-		token:   token,
-		baseURL: baseURL,
+		client:        client,
+		token:         token,
+		baseURL:       baseURL,
+		webhookSecret: webhookSecret,
 	}
 }
 
@@ -248,6 +250,31 @@ func (c *GiteaClient) GetBranch(ctx context.Context, owner, repo, branch string)
 	return true, nil
 }
 
+// ListBranches lists all branches in a repository
+func (c *GiteaClient) ListBranches(ctx context.Context, owner, repo string) ([]string, error) {
+	opts := gitea.ListRepoBranchesOptions{
+		ListOptions: gitea.ListOptions{Page: 1, PageSize: 100},
+	}
+	var branches []string
+	for {
+		branchList, _, err := c.client.ListRepoBranches(owner, repo, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list branches: %w", err)
+		}
+		if len(branchList) == 0 {
+			break
+		}
+		for _, b := range branchList {
+			branches = append(branches, b.Name)
+		}
+		if len(branchList) < 100 {
+			break
+		}
+		opts.Page++
+	}
+	return branches, nil
+}
+
 // DeleteBranch deletes a branch
 func (c *GiteaClient) DeleteBranch(ctx context.Context, owner, repo, branch string) error {
 	_, _, err := c.client.DeleteRepoBranch(owner, repo, branch)
@@ -347,11 +374,11 @@ func (c *GiteaClient) GetApprovals(ctx context.Context, owner, repo string, numb
 
 // VerifyWebhookSignature verifies the webhook signature using HMAC-SHA256
 func (c *GiteaClient) VerifyWebhookSignature(body []byte, signature string) bool {
-	if c.token == "" {
+	if c.webhookSecret == "" {
 		return false
 	}
 
-	mac := hmac.New(sha256.New, []byte(c.token))
+	mac := hmac.New(sha256.New, []byte(c.webhookSecret))
 	mac.Write(body)
 	expectedMAC := hex.EncodeToString(mac.Sum(nil))
 

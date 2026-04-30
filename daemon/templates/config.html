@@ -1,6 +1,14 @@
-{{define "title"}}Config - Asika{{end}}
-{{template "layout.html" .}}
-{{define "content"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "styles"}}
+    <title>Config - Asika</title>
+</head>
+<body>
+{{template "header" .}}
+<div class="container">
 <h1>Configuration</h1>
 <div id="errorMsg" class="error" style="display:none;"></div>
 <div id="successMsg" class="success" style="display:none;"></div>
@@ -9,9 +17,7 @@
     <pre id="configDisplay" style="background: #f9f9f9; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 13px;">Loading...</pre>
     <div style="margin-top: 20px;">
         <h3>Update Configuration</h3>
-        <p style="color: #666; font-size: 13px; margin-bottom: 15px;">
-            Paste TOML configuration below. Hot-reloadable items: label_rules, notify channels, core_contributors, hookpath.
-        </p>
+        <p style="color: #666; font-size: 13px; margin-bottom: 15px;">Paste TOML configuration below.</p>
         <textarea id="configInput" rows="20" style="width:100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; font-size: 13px;"></textarea>
         <div style="margin-top: 15px;">
             <button class="btn btn-primary" onclick="updateConfig()">Update Config</button>
@@ -19,58 +25,20 @@
         </div>
     </div>
 </div>
+</div>
+{{template "scripts"}}
 <script>
     async function loadConfig() {
-        try {
-            const resp = await apiRequest('/api/v1/config');
-            if (resp.ok) {
-                const config = await resp.json();
-                document.getElementById('configDisplay').textContent = JSON.stringify(config, null, 2);
-                document.getElementById('configInput').value = '';
-            }
-        } catch (e) {
-            showError('Failed to load config: ' + e.message);
-        }
+        try { const resp = await apiRequest('/api/v1/config'); if(resp.ok){ const c=await resp.json(); document.getElementById('configDisplay').textContent=JSON.stringify(c,null,2); } } catch(e){ showError('Failed: '+e.message); }
     }
-
     async function updateConfig() {
-        const tomlInput = document.getElementById('configInput').value;
-        if (!tomlInput.trim()) {
-            showError('Please paste TOML configuration');
-            return;
-        }
-
-        try {
-            const resp = await apiRequest('/api/v1/config', {
-                method: 'PUT',
-                body: JSON.stringify({ toml: tomlInput })
-            });
-            const data = await resp.json();
-            if (resp.ok) {
-                showSuccess('Configuration updated successfully!');
-                loadConfig();
-            } else {
-                showError(data.error || 'Failed to update config');
-            }
-        } catch (e) {
-            showError('Error: ' + e.message);
-        }
+        const v = document.getElementById('configInput').value; if(!v.trim()){ showError('Paste TOML first'); return; }
+        try { const resp = await apiRequest('/api/v1/config',{method:'PUT',body:JSON.stringify({toml:v})}); const d=await resp.json(); if(resp.ok){ showSuccess('Updated!'); loadConfig(); } else { showError(d.error||'Failed'); } } catch(e){ showError('Error: '+e.message); }
     }
-
-    function showError(msg) {
-        const el = document.getElementById('errorMsg');
-        el.textContent = msg;
-        el.style.display = 'block';
-        setTimeout(() => { el.style.display = 'none'; }, 5000);
-    }
-
-    function showSuccess(msg) {
-        const el = document.getElementById('successMsg');
-        el.textContent = msg;
-        el.style.display = 'block';
-        setTimeout(() => { el.style.display = 'none'; }, 5000);
-    }
-
+    function showError(m){ const e=document.getElementById('errorMsg'); e.textContent=m; e.style.display='block'; setTimeout(()=>e.style.display='none',5000); }
+    function showSuccess(m){ const e=document.getElementById('successMsg'); e.textContent=m; e.style.display='block'; setTimeout(()=>e.style.display='none',5000); }
     loadConfig();
 </script>
-{{end}}
+{{template "client_auth"}}
+</body>
+</html>

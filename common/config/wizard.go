@@ -23,13 +23,12 @@ type WizardStep struct {
 
 // WizardData holds temporary wizard data
 type WizardData struct {
-    Mode         string
-    Tokens       models.TokensConfig
-    RepoGroups   []models.RepoGroupConfig
-    SingleRepo   models.SingleRepoConfig
-    Events       models.EventsConfig
-    Notify       []models.NotifyConfig
-    AdminUser    models.User
+	Tokens       models.TokensConfig
+	RepoGroups   []models.RepoGroupConfig
+	SingleRepo   models.SingleRepoConfig
+	Events       models.EventsConfig
+	Notify       []models.NotifyConfig
+	AdminUser    models.User
 }
 
 // GetWizardSteps returns the list of wizard steps
@@ -76,33 +75,40 @@ func GetWizardSteps() []WizardStep {
 
 // GenerateConfig generates TOML config from wizard data
 func GenerateConfig(data *WizardData) (string, error) {
-    cfg := models.Config{
-        Mode: data.Mode,
-        Server: models.ServerConfig{
-            Listen: ":8080",
-            Mode:   "release",
-        },
-        Database: models.DatabaseConfig{
-            Path: "/var/lib/asika/asika.db",
-        },
-        Auth: models.AuthConfig{
-            JWTSecret:   GenerateUUID(),
-            TokenExpiry: "72h",
-        },
-        Tokens:      data.Tokens,
-        Events:      data.Events,
-        Notify:      data.Notify,
-        MergeQueue: models.MergeQueueConfig{
-            RequiredApprovals: 1,
-        },
-        HookPath:    "",
-    }
+	cfg := models.Config{
+		Server: models.ServerConfig{
+			Listen: ":8080",
+			Mode:   "release",
+		},
+		Database: models.DatabaseConfig{
+			Path: "/var/lib/asika/asika.db",
+		},
+		Auth: models.AuthConfig{
+			JWTSecret:   GenerateUUID(),
+			TokenExpiry: "72h",
+		},
+		Tokens:      data.Tokens,
+		Events:      data.Events,
+		Notify:      data.Notify,
+		MergeQueue: models.MergeQueueConfig{
+			RequiredApprovals: 1,
+		},
+		HookPath:    "",
+	}
 
-    if data.Mode == "multi" {
-        cfg.RepoGroups = data.RepoGroups
-    } else {
-        cfg.SingleRepo = data.SingleRepo
-    }
+	// Set mode from first repo group or default to multi
+	if len(data.RepoGroups) > 0 {
+		cfg.RepoGroups = data.RepoGroups
+	} else {
+		// Create a default repo group
+		mode := "multi"
+		cfg.RepoGroups = []models.RepoGroupConfig{
+			{
+				Name: "default",
+				Mode: mode,
+			},
+		}
+	}
 
     // Hash admin password
     hashedPassword, err := bcrypt.GenerateFromPassword([]byte(data.AdminUser.PasswordHash), bcrypt.DefaultCost)

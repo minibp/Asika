@@ -13,6 +13,14 @@ import (
 	"asika/common/platforms"
 )
 
+// clients is a package-level variable to access platform clients
+var clients map[platforms.PlatformType]platforms.PlatformClient
+
+// InitClients initializes the platform clients for handlers
+func InitClients(c map[platforms.PlatformType]platforms.PlatformClient) {
+	clients = c
+}
+
 // ListPRs handles GET /api/v1/repos/:repo_group/prs (8.2)
 func ListPRs(c *gin.Context) {
 	repoGroup := c.Param("repo_group")
@@ -100,7 +108,37 @@ func ApprovePR(c *gin.Context) {
 		return
 	}
 
-	slog.Info("PR approved", "repo_group", repoGroup, "pr_id", prID)
+	// Get platform from PR record in DB
+	key := repoGroup + "#" + prID
+	data, err := db.Get(db.BucketPRs, key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+		return
+	}
+
+	var pr models.PRRecord
+	if err := json.Unmarshal(data, &pr); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse PR"})
+		return
+	}
+
+	client := getClientForGroup(group, pr.Platform)
+	if client == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform client available"})
+		return
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	if owner == "" || repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
+		return
+	}
+
+	if err := client.ApprovePR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+		slog.Error("failed to approve PR", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to approve PR"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "PR approved"})
 }
@@ -110,7 +148,44 @@ func ClosePR(c *gin.Context) {
 	repoGroup := c.Param("repo_group")
 	prID := c.Param("pr_id")
 
-	slog.Info("PR closed", "repo_group", repoGroup, "pr_id", prID)
+	cfg := config.Current()
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		return
+	}
+
+	key := repoGroup + "#" + prID
+	data, err := db.Get(db.BucketPRs, key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+		return
+	}
+
+	var pr models.PRRecord
+	if err := json.Unmarshal(data, &pr); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse PR"})
+		return
+	}
+
+	client := getClientForGroup(group, pr.Platform)
+	if client == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform client available"})
+		return
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	if owner == "" || repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
+		return
+	}
+
+	if err := client.ClosePR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+		slog.Error("failed to close PR", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to close PR"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "PR closed"})
 }
 
@@ -119,7 +194,44 @@ func ReopenPR(c *gin.Context) {
 	repoGroup := c.Param("repo_group")
 	prID := c.Param("pr_id")
 
-	slog.Info("PR reopened", "repo_group", repoGroup, "pr_id", prID)
+	cfg := config.Current()
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		return
+	}
+
+	key := repoGroup + "#" + prID
+	data, err := db.Get(db.BucketPRs, key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+		return
+	}
+
+	var pr models.PRRecord
+	if err := json.Unmarshal(data, &pr); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse PR"})
+		return
+	}
+
+	client := getClientForGroup(group, pr.Platform)
+	if client == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform client available"})
+		return
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	if owner == "" || repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
+		return
+	}
+
+	if err := client.ReopenPR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+		slog.Error("failed to reopen PR", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reopen PR"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "PR reopened"})
 }
 
@@ -128,7 +240,53 @@ func MarkSpam(c *gin.Context) {
 	repoGroup := c.Param("repo_group")
 	prID := c.Param("pr_id")
 
-	slog.Info("PR marked as spam", "repo_group", repoGroup, "pr_id", prID)
+	cfg := config.Current()
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		return
+	}
+
+	key := repoGroup + "#" + prID
+	data, err := db.Get(db.BucketPRs, key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+		return
+	}
+
+	var pr models.PRRecord
+	if err := json.Unmarshal(data, &pr); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse PR"})
+		return
+	}
+
+	client := getClientForGroup(group, pr.Platform)
+	if client == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform client available"})
+		return
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	if owner == "" || repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
+		return
+	}
+
+	// Close the PR as spam
+	if err := client.ClosePR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+		slog.Error("failed to mark PR as spam", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to mark as spam"})
+		return
+	}
+
+	// Update PR record to mark as spam
+	pr.State = "spam"
+	pr.SpamFlag = true
+	updated, _ := json.Marshal(pr)
+	db.Put(db.BucketPRs, key, updated)
+
+	// TODO: Send notifications to admins
+
 	c.JSON(http.StatusOK, gin.H{"message": "PR marked as spam"})
 }
 
@@ -161,6 +319,8 @@ func getClientForGroup(group *models.RepoGroup, platform string) platforms.Platf
 	if platform == "" {
 		platform = "github"
 	}
-	// This would need access to the clients map - simplified
-	return nil
+	if clients == nil {
+		return nil
+	}
+	return clients[platforms.PlatformType(platform)]
 }

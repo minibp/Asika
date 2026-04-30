@@ -28,10 +28,11 @@ type PlatformClient interface {
     AddLabel(ctx context.Context, owner, repo string, number int, label string) error
     RemoveLabel(ctx context.Context, owner, repo string, number int, label string) error
 
-    // Branch operations
-    GetBranch(ctx context.Context, owner, repo, branch string) (bool, error)
-    DeleteBranch(ctx context.Context, owner, repo, branch string) error
-    GetDefaultBranch(ctx context.Context, owner, repo string) (string, error)
+	// Branch operations
+	GetBranch(ctx context.Context, owner, repo, branch string) (bool, error)
+	ListBranches(ctx context.Context, owner, repo string) ([]string, error)
+	DeleteBranch(ctx context.Context, owner, repo, branch string) error
+	GetDefaultBranch(ctx context.Context, owner, repo string) (string, error)
 
     // CI status
     GetCIStatus(ctx context.Context, owner, repo string, commitSHA string) (string, error)
