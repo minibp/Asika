@@ -1,17 +1,24 @@
 <!DOCTYPE html>
 <html>
-<head><title>Asika</title></head>
+<head>
+    <meta charset="UTF-8">
+    <title>Asika</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 50px; }
+    </style>
+</head>
 <body>
     <h1>Asika PR Manager</h1>
-    <p>Redirecting...</p>
+    <p>Loading...</p>
     <script>
-        // Redirect to wizard if not initialized, otherwise to dashboard
         fetch('/api/v1/wizard').then(r => {
-            if (r.status === 404) {
-                window.location = '/dashboard';
-            } else {
+            if (r.status === 200) {
                 window.location = '/wizard';
+            } else {
+                window.location = '/dashboard';
             }
+        }).catch(() => {
+            window.location = '/dashboard';
         });
     </script>
 </body>

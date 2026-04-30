@@ -1,54 +1,60 @@
 package handlers
 
 import (
-    "bytes"
-    "encoding/json"
-    "net/http"
+	"encoding/json"
+	"net/http"
+	"strings"
 
-    "github.com/gin-gonic/gin"
-    "log/slog"
+	"github.com/gin-gonic/gin"
 
-    "asika/common/db"
-    "asika/common/models"
+	"asika/common/config"
+	"asika/common/db"
+	"asika/common/models"
 )
 
-// GetQueue gets the merge queue for a repo group
+// GetQueue handles GET /api/v1/queue/:repo_group (8.3)
 func GetQueue(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
+	repoGroup := c.Param("repo_group")
 
-    items := make([]models.QueueItem, 0)
-    prefix := []byte(repoGroup + "#")
+	cfg := config.Current()
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		return
+	}
 
-    err := db.ForEach(db.BucketQueueItems, func(key, value []byte) error {
-        if !bytes.HasPrefix(key, prefix) {
-            return nil
-        }
+	// Get queue items from DB
+	var items []models.QueueItem
+	err := db.ForEach(db.BucketQueueItems, func(key, value []byte) error {
+		var item models.QueueItem
+		if err := json.Unmarshal(value, &item); err != nil {
+			return nil // Skip invalid entries
+		}
+		// Filter by repo group
+		if strings.HasPrefix(string(key), repoGroup+"#") {
+			items = append(items, item)
+		}
+		return nil
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read queue"})
+		return
+	}
 
-        var item models.QueueItem
-        if err := json.Unmarshal(value, &item); err != nil {
-            return err
-        }
-
-        items = append(items, item)
-        return nil
-    })
-
-    if err != nil {
-        slog.Error("failed to get queue", "error", err)
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    c.JSON(http.StatusOK, items)
+	c.JSON(http.StatusOK, items)
 }
 
-// RecheckQueue triggers a manual recheck of the queue
+// RecheckQueue handles POST /api/v1/queue/:repo_group/recheck (8.3)
 func RecheckQueue(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
+	repoGroup := c.Param("repo_group")
 
-    slog.Info("manual queue recheck triggered", "repo_group", repoGroup)
+	cfg := config.Current()
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		return
+	}
 
-    // This would trigger the queue checker
-    // For now, just return success
-    c.JSON(http.StatusOK, gin.H{"message": "queue recheck triggered"})
+	// Trigger queue recheck - in real implementation, this would notify the queue manager
+	c.JSON(http.StatusOK, gin.H{"message": "queue recheck triggered"})
 }

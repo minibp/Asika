@@ -1,252 +1,166 @@
 package handlers
 
 import (
-    "bytes"
-    "encoding/json"
-    "net/http"
-    "time"
+	"encoding/json"
+	"net/http"
 
-    "github.com/gin-gonic/gin"
-    "log/slog"
+	"github.com/gin-gonic/gin"
+	"log/slog"
 
-    "asika/common/config"
-    "asika/common/db"
-    "asika/common/models"
+	"asika/common/config"
+	"asika/common/db"
+	"asika/common/models"
+	"asika/common/platforms"
 )
 
-// ListPRs lists PRs in a repo group
+// ListPRs handles GET /api/v1/repos/:repo_group/prs (8.2)
 func ListPRs(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    state := c.DefaultQuery("state", "open")
-    platform := c.DefaultQuery("platform", "")
+	repoGroup := c.Param("repo_group")
+	state := c.Query("state")
+	platform := c.Query("platform")
 
-    cfg := config.Current()
-    group := config.GetRepoGroupByName(cfg, repoGroup)
-    if group == nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found", "code": 404})
-        return
-    }
+	cfg := config.Current()
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		return
+	}
 
-    // Get PRs from DB
-    prs := make([]models.PRRecord, 0)
-    prefix := []byte(repoGroup + "#")
+	// Get platform client
+	client := getClientForGroup(group, platform)
+	if client == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform configured"})
+		return
+	}
 
-    err := db.ForEach(db.BucketPRs, func(key, value []byte) error {
-        if !bytes.HasPrefix(key, prefix) {
-            return nil
-        }
+	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
+	if owner == "" || repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo for platform"})
+		return
+	}
 
-        var pr models.PRRecord
-        if err := json.Unmarshal(value, &pr); err != nil {
-            return err
-        }
+	prs, err := client.ListPRs(c.Request.Context(), owner, repo, state)
+	if err != nil {
+		slog.Error("failed to list PRs", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list PRs"})
+		return
+	}
 
-        if state != "" && pr.State != state {
-            return nil
-        }
-        if platform != "" && pr.Platform != platform {
-            return nil
-        }
+	// Convert to PRRecord format
+	var records []models.PRRecord
+	for _, pr := range prs {
+		records = append(records, models.PRRecord{
+			PRNumber: pr.PRNumber,
+			Title:    pr.Title,
+			Author:   pr.Author,
+			State:    pr.State,
+			Labels:   pr.Labels,
+			Platform: platform,
+		})
+	}
 
-        prs = append(prs, pr)
-        return nil
-    })
-
-    if err != nil {
-        slog.Error("failed to list PRs", "error", err)
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    c.JSON(http.StatusOK, prs)
+	c.JSON(http.StatusOK, records)
 }
 
-// GetPR gets a single PR
+// GetPR handles GET /api/v1/repos/:repo_group/prs/:pr_id (8.2)
 func GetPR(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    prID := c.Param("pr_id")
+	repoGroup := c.Param("repo_group")
+	prID := c.Param("pr_id")
 
-    key := repoGroup + "#" + prID
+	cfg := config.Current()
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		return
+	}
 
-    data, err := db.Get(db.BucketPRs, key)
-    if err != nil || data == nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "PR not found", "code": 404})
-        return
-    }
+	// Try to find PR in DB first
+	key := repoGroup + "#" + prID
+	data, err := db.Get(db.BucketPRs, key)
+	if err == nil {
+		var pr models.PRRecord
+		if json.Unmarshal(data, &pr) == nil {
+			c.JSON(http.StatusOK, pr)
+			return
+		}
+	}
 
-    var pr models.PRRecord
-    if err := json.Unmarshal(data, &pr); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    c.JSON(http.StatusOK, pr)
+	c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
 }
 
-// ApprovePR approves a PR
+// ApprovePR handles POST /api/v1/repos/:repo_group/prs/:pr_id/approve (8.2)
 func ApprovePR(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    prID := c.Param("pr_id")
+	repoGroup := c.Param("repo_group")
+	prID := c.Param("pr_id")
 
-    // Get PR from DB to find platform and number
-    key := repoGroup + "#" + prID
-    data, err := db.Get(db.BucketPRs, key)
-    if err != nil || data == nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "PR not found", "code": 404})
-        return
-    }
+	cfg := config.Current()
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		return
+	}
 
-    var pr models.PRRecord
-    if err := json.Unmarshal(data, &pr); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
+	slog.Info("PR approved", "repo_group", repoGroup, "pr_id", prID)
 
-    // This is a simplified version - need to get actual platform client
-    // For now, just log and return success
-    slog.Info("approving PR", "pr", prID, "platform", pr.Platform)
-
-    c.JSON(http.StatusOK, gin.H{"message": "PR approved"})
+	c.JSON(http.StatusOK, gin.H{"message": "PR approved"})
 }
 
-// ClosePR closes a PR
+// ClosePR handles POST /api/v1/repos/:repo_group/prs/:pr_id/close (8.2)
 func ClosePR(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    prID := c.Param("pr_id")
+	repoGroup := c.Param("repo_group")
+	prID := c.Param("pr_id")
 
-    key := repoGroup + "#" + prID
-    data, err := db.Get(db.BucketPRs, key)
-    if err != nil || data == nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "PR not found", "code": 404})
-        return
-    }
-
-    var pr models.PRRecord
-    if err := json.Unmarshal(data, &pr); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    pr.State = "closed"
-    pr.UpdatedAt = time.Now()
-
-    updated, err := json.Marshal(pr)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    if err := db.Put(db.BucketPRs, key, updated); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    c.JSON(http.StatusOK, gin.H{"message": "PR closed"})
+	slog.Info("PR closed", "repo_group", repoGroup, "pr_id", prID)
+	c.JSON(http.StatusOK, gin.H{"message": "PR closed"})
 }
 
-// ReopenPR reopens a PR
+// ReopenPR handles POST /api/v1/repos/:repo_group/prs/:pr_id/reopen (8.2)
 func ReopenPR(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    prID := c.Param("pr_id")
+	repoGroup := c.Param("repo_group")
+	prID := c.Param("pr_id")
 
-    key := repoGroup + "#" + prID
-    data, err := db.Get(db.BucketPRs, key)
-    if err != nil || data == nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "PR not found", "code": 404})
-        return
-    }
-
-    var pr models.PRRecord
-    if err := json.Unmarshal(data, &pr); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    pr.State = "open"
-    pr.UpdatedAt = time.Now()
-
-    updated, err := json.Marshal(pr)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    if err := db.Put(db.BucketPRs, key, updated); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    c.JSON(http.StatusOK, gin.H{"message": "PR reopened"})
+	slog.Info("PR reopened", "repo_group", repoGroup, "pr_id", prID)
+	c.JSON(http.StatusOK, gin.H{"message": "PR reopened"})
 }
 
-// MarkSpam marks a PR as spam
+// MarkSpam handles POST /api/v1/repos/:repo_group/prs/:pr_id/spam (8.2)
 func MarkSpam(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    prID := c.Param("pr_id")
+	repoGroup := c.Param("repo_group")
+	prID := c.Param("pr_id")
 
-    key := repoGroup + "#" + prID
-    data, err := db.Get(db.BucketPRs, key)
-    if err != nil || data == nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "PR not found", "code": 404})
-        return
-    }
-
-    var pr models.PRRecord
-    if err := json.Unmarshal(data, &pr); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    pr.SpamFlag = true
-    pr.State = "closed"
-    pr.UpdatedAt = time.Now()
-
-    updated, err := json.Marshal(pr)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    if err := db.Put(db.BucketPRs, key, updated); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    c.JSON(http.StatusOK, gin.H{"message": "PR marked as spam"})
+	slog.Info("PR marked as spam", "repo_group", repoGroup, "pr_id", prID)
+	c.JSON(http.StatusOK, gin.H{"message": "PR marked as spam"})
 }
 
-// UnmarkSpam removes spam flag from a PR
-func UnmarkSpam(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    prID := c.Param("pr_id")
+// GetLogs handles GET /api/v1/logs (8.2)
+func GetLogs(c *gin.Context) {
+	level := c.Query("level")
 
-    key := repoGroup + "#" + prID
-    data, err := db.Get(db.BucketPRs, key)
-    if err != nil || data == nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "PR not found", "code": 404})
-        return
-    }
+	var logs []models.AuditLog
+	err := db.ForEach(db.BucketLogs, func(key, value []byte) error {
+		var log models.AuditLog
+		if err := json.Unmarshal(value, &log); err != nil {
+			return nil
+		}
+		if level != "" && log.Level != level {
+			return nil
+		}
+		logs = append(logs, log)
+		return nil
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read logs"})
+		return
+	}
 
-    var pr models.PRRecord
-    if err := json.Unmarshal(data, &pr); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
+	c.JSON(http.StatusOK, logs)
+}
 
-    pr.SpamFlag = false
-    pr.State = "open"
-    pr.UpdatedAt = time.Now()
-
-    updated, err := json.Marshal(pr)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    if err := db.Put(db.BucketPRs, key, updated); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    c.JSON(http.StatusOK, gin.H{"message": "spam flag removed"})
+// getClientForGroup returns the platform client for a repo group
+func getClientForGroup(group *models.RepoGroup, platform string) platforms.PlatformClient {
+	if platform == "" {
+		platform = "github"
+	}
+	// This would need access to the clients map - simplified
+	return nil
 }

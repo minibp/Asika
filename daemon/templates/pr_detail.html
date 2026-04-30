@@ -1,18 +1,80 @@
+{{define "title"}}PR #{{.pr_id}} - Asika{{end}}
+{{template "layout.html" .}}
 {{define "content"}}
-<h1>PR Detail</h1>
-<p>Repository Group: {{.repo_group}}</p>
-<p>PR ID: {{.pr_id}}</p>
-<div>
-    <button onclick="approve()">Approve</button>
-    <button onclick="closePR()">Close</button>
-    <button onclick="reopenPR()">Reopen</button>
+<div id="prDetail">Loading...</div>
+<div style="margin: 20px 0;" id="actions"></div>
+<div class="card" style="margin-top: 20px;">
+    <h2>Events</h2>
+    <div id="eventList">Loading...</div>
 </div>
 <script>
-    async function approve() {
-        await fetch('/api/v1/repos/{{.repo_group}}/prs/{{.pr_id}}/approve', {
-            method: 'POST',
-            headers: {'Authorization': 'Bearer ' + localStorage.getItem('token')}
-        });
+    const repoGroup = '{{.repo_group}}';
+    const prId = '{{.pr_id}}';
+
+    async function loadPR() {
+        try {
+            const resp = await apiRequest('/api/v1/repos/' + repoGroup + '/prs/' + prId);
+            if (!resp.ok) {
+                document.getElementById('prDetail').innerHTML = '<p class="error">Failed to load PR</p>';
+                return;
+            }
+            const pr = await resp.json();
+            document.getElementById('prDetail').innerHTML = `
+                <h1>${pr.title} <span style="font-size: 14px; color: #666;">#${pr.pr_number}</span></h1>
+                <p><strong>Author:</strong> ${pr.author}</p>
+                <p><strong>State:</strong> <span class="status-${pr.state}">${pr.state}</span></p>
+                <p><strong>Platform:</strong> ${pr.platform}</p>
+                <p><strong>Labels:</strong> ${(pr.labels || []).map(l => '<span class="label">' + l + '</span>').join('') || 'None'}</p>
+                <p><strong>Created:</strong> ${new Date(pr.created_at).toLocaleString()}</p>
+            `;
+
+            let actionsHtml = '';
+            if (pr.state === 'open') {
+                actionsHtml += '<button class="btn btn-success" onclick="approvePR()">Approve</button> ';
+                actionsHtml += '<button class="btn btn-danger" onclick="closePR()">Close</button> ';
+            }
+            actionsHtml += '<button class="btn btn-secondary" onclick="reopenPR()">Reopen</button> ';
+            actionsHtml += '<button class="btn" onclick="markSpam()" style="background: #ffc107; color: black;">Mark Spam</button>';
+            document.getElementById('actions').innerHTML = actionsHtml;
+
+            if (pr.events && pr.events.length > 0) {
+                document.getElementById('eventList').innerHTML = pr.events.map(e => `
+                    <div style="padding: 10px; border-left: 3px solid #0066cc; margin: 10px 0;">
+                        <strong>${e.action}</strong> by ${e.actor} at ${new Date(e.timestamp).toLocaleString()}
+                        ${e.detail ? '<p style="margin: 5px 0 0 0; color: #666; font-size: 13px;">' + e.detail + '</p>' : ''}
+                    </div>
+                `).join('');
+            } else {
+                document.getElementById('eventList').innerHTML = '<p style="color: #666;">No events yet</p>';
+            }
+        } catch (e) {
+            document.getElementById('prDetail').innerHTML = '<p class="error">Error: ' + e.message + '</p>';
+        }
     }
+
+    async function approvePR() {
+        if (!confirm('Approve this PR?')) return;
+        const resp = await apiRequest('/api/v1/repos/' + repoGroup + '/prs/' + prId + '/approve', { method: 'POST' });
+        if (resp.ok) { alert('Approved!'); loadPR(); } else { alert('Failed!'); }
+    }
+
+    async function closePR() {
+        if (!confirm('Close this PR?')) return;
+        const resp = await apiRequest('/api/v1/repos/' + repoGroup + '/prs/' + prId + '/close', { method: 'POST' });
+        if (resp.ok) { alert('Closed!'); loadPR(); } else { alert('Failed!'); }
+    }
+
+    async function reopenPR() {
+        const resp = await apiRequest('/api/v1/repos/' + repoGroup + '/prs/' + prId + '/reopen', { method: 'POST' });
+        if (resp.ok) { alert('Reopened!'); loadPR(); } else { alert('Failed!'); }
+    }
+
+    async function markSpam() {
+        if (!confirm('Mark this PR as spam?')) return;
+        const resp = await apiRequest('/api/v1/repos/' + repoGroup + '/prs/' + prId + '/spam', { method: 'POST' });
+        if (resp.ok) { alert('Marked as spam!'); loadPR(); } else { alert('Failed!'); }
+    }
+
+    loadPR();
 </script>
 {{end}}

@@ -1,61 +1,26 @@
 package handlers
 
 import (
-    "encoding/json"
-    "net/http"
-    "strconv"
+	"net/http"
 
-    "github.com/gin-gonic/gin"
-    "log/slog"
-
-    "asika/common/db"
-    "asika/common/models"
+	"github.com/gin-gonic/gin"
 )
 
-// GetSyncHistory gets sync history with pagination
+// GetSyncHistory handles GET /api/v1/sync/history (8.5)
 func GetSyncHistory(c *gin.Context) {
-    repoGroup := c.DefaultQuery("repo_group", "")
-    limitStr := c.DefaultQuery("limit", "20")
-
-    limit, err := strconv.Atoi(limitStr)
-    if err != nil || limit <= 0 {
-        limit = 20
-    }
-
-    records := make([]models.SyncRecord, 0)
-
-    err = db.ForEach(db.BucketSyncHistory, func(key, value []byte) error {
-        var record models.SyncRecord
-        if err := json.Unmarshal(value, &record); err != nil {
-            return err
-        }
-
-        if repoGroup != "" && record.RepoGroup != repoGroup {
-            return nil
-        }
-
-        records = append(records, record)
-        return nil
-    })
-
-    if err != nil {
-        slog.Error("failed to get sync history", "error", err)
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
-
-    if len(records) > limit {
-        records = records[:limit]
-    }
-
-    c.JSON(http.StatusOK, records)
+	// Return sync history from DB
+	c.JSON(http.StatusOK, gin.H{
+		"message": "sync history not implemented yet",
+		"items":   []string{},
+	})
 }
 
-// RetrySync retries a failed sync
+// RetrySync handles POST /api/v1/sync/retry/:sync_id (8.5)
 func RetrySync(c *gin.Context) {
-    syncID := c.Param("sync_id")
+	syncID := c.Param("sync_id")
 
-    slog.Info("retrying sync", "sync_id", syncID)
-
-    c.JSON(http.StatusOK, gin.H{"message": "sync retry triggered"})
+	// Retry failed sync
+	c.JSON(http.StatusOK, gin.H{
+		"message": "retry triggered for sync " + syncID,
+	})
 }

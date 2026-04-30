@@ -1,81 +1,89 @@
 package handlers
 
 import (
-    "net/http"
+	"net/http"
+	"os"
+	"path/filepath"
 
-    "github.com/gin-gonic/gin"
-    "log/slog"
+	"github.com/BurntSushi/toml"
+	"github.com/gin-gonic/gin"
+	"log/slog"
 
-    "asika/common/config"
+	"asika/common/config"
+	"asika/common/models"
 )
 
-// GetWizardSteps returns the wizard steps
+// GetWizardSteps handles GET /api/v1/wizard (10. WebUI Wizard)
 func GetWizardSteps(c *gin.Context) {
-    // Check if already initialized
-    if config.IsInitialized(config.ConfigPath) {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "already initialized", "code": 400})
-        return
-    }
+	// Check if already initialized
+	if config.IsInitialized(config.ConfigPath) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "already initialized"})
+		return
+	}
 
-    steps := config.GetWizardSteps()
-    c.JSON(http.StatusOK, steps)
+	steps := []string{
+		"mode_selection",
+		"database_config",
+		"platform_tokens",
+		"repository_group",
+		"admin_account",
+	}
+	c.JSON(http.StatusOK, gin.H{"steps": steps})
 }
 
-// SubmitWizardStep submits a wizard step
+// SubmitWizardStep handles POST /api/v1/wizard/step/:step
 func SubmitWizardStep(c *gin.Context) {
-    step := c.Param("step")
+	step := c.Param("step")
 
-    var data map[string]interface{}
-    if err := c.ShouldBindJSON(&data); err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request", "code": 400})
-        return
-    }
+	var data map[string]interface{}
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
 
-    slog.Info("wizard step submitted", "step", step, "data", data)
-
-    c.JSON(http.StatusOK, gin.H{"message": "step saved", "step": step})
+	slog.Info("wizard step submitted", "step", step, "data", data)
+	c.JSON(http.StatusOK, gin.H{"message": "step saved", "step": step})
 }
 
-// WizardPage renders the wizard page
-func WizardPage(c *gin.Context) {
-    c.HTML(http.StatusOK, "wizard.html", gin.H{"title": "Asika Setup Wizard"})
-}
+// CompleteWizard handles POST /api/v1/wizard/step/complete (10. WebUI Wizard)
+// Writes config to /etc/asika_config.toml
+func CompleteWizard(c *gin.Context) {
+	var cfg models.Config
 
-// LoginPage renders the login page
-func LoginPage(c *gin.Context) {
-    c.HTML(http.StatusOK, "login.html", gin.H{"title": "Login - Asika"})
-}
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid config", "detail": err.Error()})
+		return
+	}
 
-// Dashboard renders the dashboard
-func Dashboard(c *gin.Context) {
-    c.HTML(http.StatusOK, "dashboard.html", gin.H{"title": "Dashboard - Asika"})
-}
+	// Get config path
+	configPath := os.Getenv("ASIKA_CONFIG")
+	if configPath == "" {
+		configPath = "/etc/asika_config.toml"
+	}
 
-// PRListPage renders the PR list page
-func PRListPage(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    c.HTML(http.StatusOK, "pr_list.html", gin.H{
-        "title":     "PRs - Asika",
-        "repo_group": repoGroup,
-    })
-}
+	// Ensure directory exists
+	dir := filepath.Dir(configPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create config directory"})
+		return
+	}
 
-// PRDetailPage renders the PR detail page
-func PRDetailPage(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    prID := c.Param("pr_id")
-    c.HTML(http.StatusOK, "pr_detail.html", gin.H{
-        "title":      "PR Detail - Asika",
-        "repo_group": repoGroup,
-        "pr_id":      prID,
-    })
-}
+	// Marshal to TOML
+	data, err := toml.Marshal(&cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to marshal config"})
+		return
+	}
 
-// QueuePage renders the queue page
-func QueuePage(c *gin.Context) {
-    repoGroup := c.Param("repo_group")
-    c.HTML(http.StatusOK, "queue.html", gin.H{
-        "title":      "Queue - Asika",
-        "repo_group": repoGroup,
-    })
+	// Write to file
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config file"})
+		return
+	}
+
+	// Update in-memory config
+	config.Store(&cfg)
+
+	slog.Info("wizard completed, config saved", "path", configPath)
+	c.JSON(http.StatusOK, gin.H{"message": "setup complete", "path": configPath})
 }

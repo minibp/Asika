@@ -1,0 +1,84 @@
+{{define "title"}}PRs - Asika{{end}}
+{{template "layout.html" .}}
+{{define "content"}}
+<h1>PR List</h1>
+<div class="form-group">
+    <label>Filter by state:</label>
+    <select id="stateFilter" onchange="loadPRs()">
+        <option value="open">Open</option>
+        <option value="closed">Closed</option>
+        <option value="merged">Merged</option>
+        <option value="">All</option>
+    </select>
+</div>
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Platform</th>
+                <th>State</th>
+                <th>Labels</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="prTableBody">
+            <tr><td colspan="7" style="text-align: center;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+<script>
+    async function loadPRs() {
+        const state = document.getElementById('stateFilter').value;
+        const tbody = document.getElementById('prTableBody');
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Loading...</td></tr>';
+
+        try {
+            const resp = await apiRequest('/api/v1/repos/main/prs' + (state ? '?state=' + state : ''));
+            if (!resp.ok) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: red;">Failed to load PRs</td></tr>';
+                return;
+            }
+            const prs = await resp.json();
+            if (prs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No PRs found</td></tr>';
+                return;
+            }
+            tbody.innerHTML = prs.map(pr => `
+                <tr>
+                    <td>${pr.pr_number}</td>
+                    <td><a href="/prs/${pr.pr_number}" style="color: #0066cc; text-decoration: none;">${pr.title}</a></td>
+                    <td>${pr.author}</td>
+                    <td>${pr.platform}</td>
+                    <td class="status-${pr.state}">${pr.state}</td>
+                    <td>${(pr.labels || []).map(l => '<span class="label">' + l + '</span>').join('')}</td>
+                    <td>
+                        ${pr.state === 'open' ? `
+                            <button class="btn btn-success" onclick="approvePR(${pr.pr_number})" style="padding: 4px 8px; font-size: 12px;">Approve</button>
+                            <button class="btn btn-danger" onclick="closePR(${pr.pr_number})" style="padding: 4px 8px; font-size: 12px;">Close</button>
+                        ` : ''}
+                    </td>
+                </tr>
+            `).join('');
+        } catch (e) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: red;">Error: ' + e.message + '</td></tr>';
+        }
+    }
+
+    async function approvePR(prNumber) {
+        if (!confirm('Approve PR #' + prNumber + '?')) return;
+        const resp = await apiRequest('/api/v1/repos/main/prs/' + prNumber + '/approve', { method: 'POST' });
+        if (resp.ok) { alert('PR approved!'); loadPRs(); } else { alert('Failed!'); }
+    }
+
+    async function closePR(prNumber) {
+        if (!confirm('Close PR #' + prNumber + '?')) return;
+        const resp = await apiRequest('/api/v1/repos/main/prs/' + prNumber + '/close', { method: 'POST' });
+        if (resp.ok) { alert('PR closed!'); loadPRs(); } else { alert('Failed!'); }
+    }
+
+    loadPRs();
+</script>
+{{end}}

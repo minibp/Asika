@@ -1,68 +1,66 @@
 package handlers
 
 import (
-    "encoding/json"
-    "net/http"
+	"encoding/json"
+	"net/http"
 
-    "github.com/gin-gonic/gin"
-    "log/slog"
+	"github.com/gin-gonic/gin"
+	"log/slog"
 
-    "asika/common/config"
-    "asika/common/db"
-    "asika/common/models"
+	"asika/common/config"
+	"asika/common/db"
+	"asika/common/models"
 )
 
-// GetLabelRules gets the current label rules
+// GetLabelRules handles GET /api/v1/rules/labels (8.4)
 func GetLabelRules(c *gin.Context) {
-    cfg := config.Current()
+	cfg := config.Current()
+	if cfg == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config not loaded"})
+		return
+	}
 
-    if cfg == nil {
-        c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config not loaded"})
-        return
-    }
+	// Try to get from DB first (hot-reloadable)
+	data, err := db.Get(db.BucketConfig, "label_rules")
+	if err == nil {
+		var rules []map[string]interface{}
+		if json.Unmarshal(data, &rules) == nil {
+			c.JSON(http.StatusOK, rules)
+			return
+		}
+	}
 
-    // Try to get from DB first (hot-loaded)
-    data, err := db.Get(db.BucketConfig, "label_rules")
-    if err == nil && data != nil {
-        var rules []models.LabelRule
-        if err := json.Unmarshal(data, &rules); err == nil {
-            c.JSON(http.StatusOK, rules)
-            return
-        }
-    }
-
-    // Fallback to config
-    c.JSON(http.StatusOK, cfg.LabelRules)
+	// Fallback to config
+	c.JSON(http.StatusOK, cfg.LabelRules)
 }
 
-// UpdateLabelRules updates label rules (hot reload)
+// UpdateLabelRules handles PUT /api/v1/rules/labels (8.4)
 func UpdateLabelRules(c *gin.Context) {
-    var rules []models.LabelRule
+	var rules []models.LabelRule
+	if err := c.ShouldBindJSON(&rules); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
 
-    if err := c.ShouldBindJSON(&rules); err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request", "code": 400})
-        return
-    }
+	// Save to DB for hot reload
+	data, err := json.Marshal(rules)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to marshal rules"})
+		return
+	}
 
-    data, err := json.Marshal(rules)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
+	if err := db.Put(db.BucketConfig, "label_rules", data); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save rules"})
+		return
+	}
 
-    // Store in DB for hot reload
-    if err := db.Put(db.BucketConfig, "label_rules", data); err != nil {
-        slog.Error("failed to store label rules", "error", err)
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": 500})
-        return
-    }
+	// Update in-memory config
+	cfg := config.Current()
+	if cfg != nil {
+		cfg.LabelRules = rules
+		config.Store(cfg)
+	}
 
-    // Update in-memory config
-    cfg := config.Current()
-    if cfg != nil {
-        cfg.LabelRules = rules
-        config.Store(cfg)
-    }
-
-    c.JSON(http.StatusOK, gin.H{"message": "label rules updated"})
+	slog.Info("label rules updated")
+	c.JSON(http.StatusOK, gin.H{"message": "rules updated"})
 }

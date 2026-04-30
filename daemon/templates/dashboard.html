@@ -1,12 +1,43 @@
+{{define "title"}}Dashboard - Asika{{end}}
+{{template "layout.html" .}}
 {{define "content"}}
 <h1>Dashboard</h1>
-<p>Welcome to Asika PR Manager</p>
-<div>
-    <h2>Quick Stats</h2>
-    <ul>
-        <li>Open PRs: ...</li>
-        <li>Queue Items: ...</li>
-        <li>Recent Activity: ...</li>
-    </ul>
+<div class="stats">
+    <div class="stat-card">
+        <h3>Open PRs</h3>
+        <p id="openPRs">-</p>
+    </div>
+    <div class="stat-card">
+        <h3>Queue Items</h3>
+        <p id="queueItems">-</p>
+    </div>
+    <div class="stat-card">
+        <h3>Repo Groups</h3>
+        <p id="repoGroups">-</p>
+    </div>
 </div>
+<div class="card" style="margin-top: 20px;">
+    <h2>Recent Activity</h2>
+    <div id="activity">Loading...</div>
+</div>
+<script>
+    async function loadDashboard() {
+        try {
+            const resp = await apiRequest('/api/v1/repos/main/prs?state=open');
+            if (resp.ok) {
+                const prs = await resp.json();
+                document.getElementById('openPRs').textContent = prs.length;
+            }
+            const qResp = await apiRequest('/api/v1/queue/main');
+            if (qResp.ok) {
+                const queue = await qResp.json();
+                document.getElementById('queueItems').textContent = queue.length;
+            }
+            document.getElementById('repoGroups').textContent = '1';
+        } catch (e) {
+            console.error(e);
+        }
+    }
+    loadDashboard();
+</script>
 {{end}}

@@ -1,34 +1,299 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Setup Wizard - Asika</title>
     <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-        .step { margin: 20px 0; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
-        input, select { display: block; margin: 10px 0; padding: 8px; width: 100%; }
-        button { padding: 10px 20px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        * { box-sizing: border-box; margin:0; padding:0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
+        .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { margin-bottom: 10px; color: #333; }
+        .step-indicator { display: flex; justify-content: space-between; margin-bottom: 30px; }
+        .step-dot { width: 30px; height: 30px; border-radius: 50%; background: #ddd; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #666; }
+        .step-dot.active { background: #0066cc; color: white; }
+        .step-dot.done { background: #28a745; color: white; }
+        .step-content { display: none; }
+        .step-content.active { display: block; }
+        label { display: block; margin: 15px 0 5px; font-weight: 500; color: #333; font-size: 14px; }
+        input, select { display: block; width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        input:focus, select:focus { outline: none; border-color: #0066cc; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #0066cc; color: white; }
+        .btn-primary:hover { background: #0052a3; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn-secondary:hover { background: #545b62; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-success:hover { background: #218838; }
+        .nav-buttons { display: flex; justify-content: space-between; margin-top: 30px; }
+        .error { color: #dc3545; padding: 10px; background: #f8d7da; border-radius: 4px; margin-top: 15px; display: none; }
+        .success { color: #155724; padding: 10px; background: #d4edda; border-radius: 4px; margin-top: 15px; display: none; }
+        .info { color: #0c5460; padding: 10px; background: #d1ecf1; border-radius: 4px; margin: 15px 0; font-size: 13px; }
+        h3 { margin: 20px 0 10px 0; font-size: 16px; color: #333; }
+        .form-group { margin-bottom: 15px; }
     </style>
 </head>
 <body>
-    <h1>Setup Wizard</h1>
-    <div id="wizard">
-        <div class="step" id="step1">
-            <h2>Step 1: Mode Selection</h2>
-            <select id="mode">
-                <option value="single">Single Repo</option>
-                <option value="multi">Multi Platform</option>
-            </select>
-            <button onclick="nextStep(1)">Next</button>
+    <div class="card">
+        <h1>Setup Wizard</h1>
+        <p style="color: #666; margin-bottom: 20px;">Configure Asika for first use</p>
+
+        <div class="step-indicator">
+            <div class="step-dot active" id="dot1">1</div>
+            <div class="step-dot" id="dot2">2</div>
+            <div class="step-dot" id="dot3">3</div>
+            <div class="step-dot" id="dot4">4</div>
+            <div class="step-dot" id="dot5">5</div>
+        </div>
+
+        <div id="errorMsg" class="error"></div>
+        <div id="successMsg" class="success"></div>
+
+        <!-- Step 1: Mode Selection -->
+        <div class="step-content active" id="step1">
+            <h3>Step 1: Operation Mode</h3>
+            <div class="form-group">
+                <label>Select mode:</label>
+                <select id="mode" onchange="onModeChange()">
+                    <option value="single">Single Repo (one platform only)</option>
+                    <option value="multi">Multi Platform (sync across platforms)</option>
+                </select>
+                <div class="info">
+                    <strong>Single Repo:</strong> Manage PRs for one platform only. No code sync.<br>
+                    <strong>Multi Platform:</strong> Sync PRs and code across GitHub, GitLab, and Gitea.
+                </div>
+            </div>
+            <div class="nav-buttons">
+                <div></div>
+                <button class="btn btn-primary" onclick="nextStep(1)">Next</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Database -->
+        <div class="step-content" id="step2">
+            <h3>Step 2: Database Configuration</h3>
+            <div class="form-group">
+                <label>Database file path:</label>
+                <input type="text" id="dbpath" value="/var/lib/asika/asika.db">
+            </div>
+            <div class="nav-buttons">
+                <button class="btn btn-secondary" onclick="prevStep(2)">Back</button>
+                <button class="btn btn-primary" onclick="nextStep(2)">Next</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Platform Tokens -->
+        <div class="step-content" id="step3">
+            <h3>Step 3: Platform Tokens</h3>
+            <div class="form-group">
+                <label>GitHub Token (optional):</label>
+                <input type="password" id="github_token" placeholder="ghp_xxxx or leave empty">
+            </div>
+            <div class="form-group">
+                <label>GitLab Token (optional):</label>
+                <input type="password" id="gitlab_token" placeholder="glpat-xxxx or leave empty">
+            </div>
+            <div class="form-group">
+                <label>Gitea Token (optional):</label>
+                <input type="password" id="gitea_token" placeholder="gitea_xxxx or leave empty">
+            </div>
+            <div class="nav-buttons">
+                <button class="btn btn-secondary" onclick="prevStep(3)">Back</button>
+                <button class="btn btn-primary" onclick="nextStep(3)">Next</button>
+            </div>
+        </div>
+
+        <!-- Step 4: Repository Groups -->
+        <div class="step-content" id="step4">
+            <h3>Step 4: Repository Group</h3>
+            <div class="form-group">
+                <label>Group Name:</label>
+                <input type="text" id="group_name" value="default">
+            </div>
+            <div class="form-group">
+                <label>GitHub Repository (owner/repo):</label>
+                <input type="text" id="github_repo" placeholder="e.g., octocat/hello-world">
+            </div>
+            <div id="gitlabRepoGroup" class="form-group">
+                <label>GitLab Repository (owner/repo):</label>
+                <input type="text" id="gitlab_repo" placeholder="e.g., octocat/hello-world">
+            </div>
+            <div id="giteaRepoGroup" class="form-group">
+                <label>Gitea Repository (owner/repo):</label>
+                <input type="text" id="gitea_repo" placeholder="e.g., octocat/hello-world">
+            </div>
+            <div class="form-group">
+                <label>Default Branch:</label>
+                <input type="text" id="default_branch" value="main">
+            </div>
+            <div class="nav-buttons">
+                <button class="btn btn-secondary" onclick="prevStep(4)">Back</button>
+                <button class="btn btn-primary" onclick="nextStep(4)">Next</button>
+            </div>
+        </div>
+
+        <!-- Step 5: Admin Account -->
+        <div class="step-content" id="step5">
+            <h3>Step 5: Admin Account & Server</h3>
+            <div class="form-group">
+                <label>JWT Secret (leave empty to auto-generate):</label>
+                <input type="text" id="jwt_secret" placeholder="auto-generated if empty">
+                <button type="button" onclick="genSecret()" style="margin-top: 5px; padding: 5px 10px; font-size: 12px; background: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer;">Generate</button>
+            </div>
+            <div class="form-group">
+                <label>Server Listen Address:</label>
+                <input type="text" id="listen" value=":8080">
+            </div>
+            <div class="form-group">
+                <label>Admin Username:</label>
+                <input type="text" id="admin_user" value="admin">
+            </div>
+            <div class="form-group">
+                <label>Admin Password:</label>
+                <input type="password" id="admin_pass" placeholder="set a strong password">
+            </div>
+            <div class="nav-buttons">
+                <button class="btn btn-secondary" onclick="prevStep(5)">Back</button>
+                <button class="btn btn-success" onclick="submitWizard()">Complete Setup</button>
+            </div>
+        </div>
+
+        <!-- Step 6: Complete -->
+        <div class="step-content" id="step6">
+            <h3>Setup Complete!</h3>
+            <div class="success">Configuration saved successfully!</div>
+            <p style="margin-top: 15px;">You can now <a href="/login" style="color: #0066cc;">login</a> with your admin credentials.</p>
         </div>
     </div>
+
     <script>
         let currentStep = 1;
-        let wizardData = {};
 
-        async function nextStep(step) {
-            // Save data and move to next step
-            currentStep = step + 1;
-            // Implementation would continue here
+        function onModeChange() {
+            const mode = document.getElementById('mode').value;
+            const gitlabGroup = document.getElementById('gitlabRepoGroup');
+            const giteaGroup = document.getElementById('giteaRepoGroup');
+            if (mode === 'single') {
+                gitlabGroup.style.display = 'none';
+                giteaGroup.style.display = 'none';
+            } else {
+                gitlabGroup.style.display = 'block';
+                giteaGroup.style.display = 'block';
+            }
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('errorMsg');
+            el.textContent = msg;
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 5000);
+        }
+
+        function showSuccess(msg) {
+            const el = document.getElementById('successMsg');
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+
+        function updateDots(step) {
+            for (let i = 1; i <= 5; i++) {
+                const dot = document.getElementById('dot' + i);
+                dot.classList.remove('active', 'done');
+                if (i < step) dot.classList.add('done');
+                else if (i === step) dot.classList.add('active');
+            }
+        }
+
+        function goToStep(step) {
+            document.querySelectorAll('.step-content').forEach(el => el.classList.remove('active'));
+            document.getElementById('step' + step).classList.add('active');
+            updateDots(step);
+            currentStep = step;
+        }
+
+        function nextStep(step) {
+            goToStep(step + 1);
+        }
+
+        function prevStep(step) {
+            goToStep(step - 1);
+        }
+
+        function genSecret() {
+            const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let secret = '';
+            for (let i = 0; i < 32; i++) {
+                secret += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            document.getElementById('jwt_secret').value = secret;
+        }
+
+        function genSecretValue() {
+            const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let secret = '';
+            for (let i = 0; i < 32; i++) {
+                secret += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return secret;
+        }
+
+        async function submitWizard() {
+            const mode = document.getElementById('mode').value;
+            const jwtSecret = document.getElementById('jwt_secret').value || genSecretValue();
+
+            const config = {
+                mode: mode,
+                database: { path: document.getElementById('dbpath').value },
+                tokens: {
+                    github: document.getElementById('github_token').value,
+                    gitlab: document.getElementById('gitlab_token').value,
+                    gitea: document.getElementById('gitea_token').value
+                },
+                auth: {
+                    jwt_secret: jwtSecret,
+                    token_expiry: "72h"
+                },
+                server: {
+                    listen: document.getElementById('listen').value,
+                    mode: "release"
+                },
+                repo_groups: [{
+                    name: document.getElementById('group_name').value,
+                    mode: mode,
+                    github: document.getElementById('github_repo').value,
+                    gitlab: document.getElementById('gitlab_repo').value,
+                    gitea: document.getElementById('gitea_repo').value,
+                    default_branch: document.getElementById('default_branch').value,
+                    merge_queue: {
+                        required_approvals: 1,
+                        ci_check_required: true
+                    }
+                }],
+                users: [{
+                    username: document.getElementById('admin_user').value,
+                    password: document.getElementById('admin_pass').value,
+                    role: "admin"
+                }],
+                events: { mode: "webhook" },
+                merge_queue: { required_approvals: 1, ci_check_required: true },
+                spam: { enabled: false }
+            };
+
+            try {
+                const resp = await fetch('/api/v1/wizard/step/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                const data = await resp.json();
+                if (data.error) {
+                    showError('Error: ' + data.error);
+                } else {
+                    goToStep(6);
+                }
+            } catch (e) {
+                showError('Failed to submit: ' + e.message);
+            }
         }
     </script>
 </body>

@@ -1,10 +1,78 @@
+{{define "title"}}Queue - Asika{{end}}
+{{template "layout.html" .}}
 {{define "content"}}
 <h1>Merge Queue</h1>
-<p>Repository Group: {{.repo_group}}</p>
-<div>
-    <table>
-        <tr><th>PR ID</th><th>Status</th><th>Added At</th></tr>
-        <tr><td>...</td><td>...</td><td>...</td></tr>
+<div class="card">
+    <p style="margin:0 0 15px 0; color: #666;">Repository Group: <strong>{{.repo_group}}</strong></p>
+    <button class="btn btn-primary" onclick="recheckQueue()">Recheck Queue</button>
+    <table style="margin-top: 20px;">
+        <thead>
+            <tr>
+                <th>PR</th>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Approvals</th>
+                <th>CI Status</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="queueBody">
+            <tr><td colspan="6" style="text-align: center;">Loading...</td></tr>
+        </tbody>
     </table>
 </div>
+<script>
+    const repoGroup = '{{.repo_group}}';
+
+    async function loadQueue() {
+        const tbody = document.getElementById('queueBody');
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Loading...</td></tr>';
+
+        try {
+            const resp = await apiRequest('/api/v1/queue/' + repoGroup);
+            if (!resp.ok) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: red;">Failed to load queue</td></tr>';
+                return;
+            }
+            const items = await resp.json();
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Queue is empty</td></tr>';
+                return;
+            }
+            tbody.innerHTML = items.map(item => `
+                <tr>
+                    <td>#${item.pr_id}</td>
+                    <td>${item.title || 'PR #' + item.pr_id}</td>
+                    <td class="status-${item.status}">${item.status}</td>
+                    <td>${(item.criteria && item.criteria.approved_by) ? item.criteria.approved_by.join(', ') : '-'}</td>
+                    <td>${item.criteria ? item.criteria.ci_status : '-'}</td>
+                    <td>
+                        ${item.status === 'waiting' ? '<span style="color: #ffc107;">Waiting for conditions</span>' : ''}
+                        ${item.status === 'checking' ? '<span style="color: #17a2b8;">Checking...</span>' : ''}
+                        ${item.status === 'done' ? '<span style="color: #28a745;">Ready to merge</span>' : ''}
+                        ${item.status === 'failed' ? '<span style="color: #dc3545;">Failed</span>' : ''}
+                    </td>
+                </tr>
+            `).join('');
+        } catch (e) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: red;">Error: ' + e.message + '</td></tr>';
+        }
+    }
+
+    async function recheckQueue() {
+        try {
+            const resp = await apiRequest('/api/v1/queue/' + repoGroup + '/recheck', { method: 'POST' });
+            if (resp.ok) {
+                alert('Queue recheck triggered!');
+                setTimeout(() => loadQueue(), 1000);
+            } else {
+                alert('Failed to recheck queue');
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    loadQueue();
+</script>
 {{end}}
