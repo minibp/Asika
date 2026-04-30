@@ -160,6 +160,7 @@ func (s *Server) setupRoutes() {
             config.Use(RequireRole("admin"))
             {
                 config.GET("", handlers.GetConfig)
+                config.PUT("", handlers.UpdateConfig)
             }
 
             test := protected.Group("/test")
