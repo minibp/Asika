@@ -1,102 +1,91 @@
 package platforms
 
 import (
-    "context"
-    "fmt"
-    "log/slog"
-    "os"
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
 
-    "asika/common/config"
-    "asika/common/models"
+	"asika/common/config"
+	"asika/common/models"
 )
 
 // CheckMergeMethods checks if all repositories have consistent merge methods
 func CheckMergeMethods(cfg *models.Config, clients map[PlatformType]PlatformClient) error {
-    if cfg == nil {
-        return fmt.Errorf("config is nil")
-    }
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
 
-    repos := config.GetRepoGroups(cfg)
-    for _, repo := range repos {
-        if err := checkRepoMergeMethod(cfg, clients, repo); err != nil {
-            return err
-        }
-    }
+	repos := config.GetRepoGroups(cfg)
+	for _, repo := range repos {
+		if err := checkRepoMergeMethod(cfg, clients, repo); err != nil {
+			return err
+		}
+	}
 
-    slog.Info("merge method check passed")
-    return nil
+	slog.Info("merge method check passed")
+	return nil
 }
 
 // checkRepoMergeMethod checks a single repository group
 func checkRepoMergeMethod(cfg *models.Config, clients map[PlatformType]PlatformClient, repo models.RepoGroup) error {
-    ctx := context.Background()
+	ctx := context.Background()
 
-    // Check GitHub
-    if repo.GitHub != "" && clients[PlatformGitHub] != nil {
-        if err := checkPlatformMergeMethod(ctx, clients[PlatformGitHub], "github", repo.GitHub, repo.DefaultBranch); err != nil {
-            return err
-        }
-    }
+	// Check GitHub
+	if repo.GitHub != "" && clients[PlatformGitHub] != nil {
+		if err := checkPlatformMergeMethod(ctx, clients[PlatformGitHub], "github", repo.GitHub, repo.DefaultBranch); err != nil {
+			return err
+		}
+	}
 
-    // Check GitLab
-    if repo.GitLab != "" && clients[PlatformGitLab] != nil {
-        if err := checkPlatformMergeMethod(ctx, clients[PlatformGitLab], "gitlab", repo.GitLab, repo.DefaultBranch); err != nil {
-            return err
-        }
-    }
+	// Check GitLab
+	if repo.GitLab != "" && clients[PlatformGitLab] != nil {
+		if err := checkPlatformMergeMethod(ctx, clients[PlatformGitLab], "gitlab", repo.GitLab, repo.DefaultBranch); err != nil {
+			return err
+		}
+	}
 
-    // Check Gitea
-    if repo.Gitea != "" && clients[PlatformGitea] != nil {
-        if err := checkPlatformMergeMethod(ctx, clients[PlatformGitea], "gitea", repo.Gitea, repo.DefaultBranch); err != nil {
-            return err
-        }
-    }
+	// Check Gitea
+	if repo.Gitea != "" && clients[PlatformGitea] != nil {
+		if err := checkPlatformMergeMethod(ctx, clients[PlatformGitea], "gitea", repo.Gitea, repo.DefaultBranch); err != nil {
+			return err
+		}
+	}
 
-    return nil
+	return nil
 }
 
 // checkPlatformMergeMethod checks a single platform repository
 func checkPlatformMergeMethod(ctx context.Context, client PlatformClient, platform, repo, branch string) error {
-    parts := parseRepoName(repo)
-    if len(parts) != 2 {
-        return fmt.Errorf("invalid repo format: %s", repo)
-    }
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid repo format: %s", repo)
+	}
 
-    hasMultiple, err := client.HasMultipleMergeMethods(ctx, parts[0], parts[1])
-    if err != nil {
-        return fmt.Errorf("failed to check merge methods for %s/%s: %w", parts[0], parts[1], err)
-    }
+	hasMultiple, err := client.HasMultipleMergeMethods(ctx, parts[0], parts[1])
+	if err != nil {
+		return fmt.Errorf("failed to check merge methods for %s: %w", repo, err)
+	}
 
-    if hasMultiple {
-        defaultMethod, err := client.GetDefaultMergeMethod(ctx, parts[0], parts[1])
-        if err != nil || defaultMethod == "" {
-            return fmt.Errorf("repository %s/%s has multiple merge methods but cannot determine default: %v", parts[0], parts[1], err)
-        }
-        slog.Info("repository has multiple merge methods, using default", 
-            "platform", platform, 
-            "repo", repo, 
-            "default", defaultMethod)
-    }
+	if hasMultiple {
+		defaultMethod, err := client.GetDefaultMergeMethod(ctx, parts[0], parts[1])
+		if err != nil || defaultMethod == "" {
+			return fmt.Errorf("repository %s has multiple merge methods but cannot determine default: %v", repo, err)
+		}
+		slog.Info("repository has multiple merge methods, using default",
+			"platform", platform,
+			"repo", repo,
+			"default", defaultMethod)
+	}
 
-    return nil
-}
-
-// parseRepoName parses owner/repo format
-func parseRepoName(repo string) []string {
-    parts := make([]string, 0)
-    for i, c := range repo {
-        if c == '/' {
-            parts = append(parts, repo[:i], repo[i+1:])
-            break
-        }
-    }
-    return parts
+	return nil
 }
 
 // ExitOnCheckFailed exits if merge method check fails
 func ExitOnCheckFailed(err error) {
-    if err != nil {
-        slog.Error("FATAL: merge method check failed", "error", err)
-        os.Exit(1)
-    }
+	if err != nil {
+		slog.Error("FATAL: merge method check failed", "error", err)
+		os.Exit(1)
+	}
 }

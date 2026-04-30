@@ -21,7 +21,7 @@ type PlatformClient interface {
     GetPR(ctx context.Context, owner, repo string, number int) (*models.PRRecord, error)
     ListPRs(ctx context.Context, owner, repo string, state string) ([]*models.PRRecord, error)
     ApprovePR(ctx context.Context, owner, repo string, number int) error
-    MergePR(ctx context.Context, owner, repo string, number int) error
+    MergePR(ctx context.Context, owner, repo string, number int, method string) error
     ClosePR(ctx context.Context, owner, repo string, number int) error
     ReopenPR(ctx context.Context, owner, repo string, number int) error
     CommentPR(ctx context.Context, owner, repo string, number int, body string) error
@@ -46,6 +46,7 @@ type PlatformClient interface {
     // Webhook
     VerifyWebhookSignature(body []byte, signature string) bool
 
-    // PR commits
+    // PR commits & diff files
     GetPRCommits(ctx context.Context, owner, repo string, number int) ([]string, error)
+    GetDiffFiles(ctx context.Context, owner, repo string, number int) ([]string, error)
 }

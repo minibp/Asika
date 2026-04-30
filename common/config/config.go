@@ -2,23 +2,27 @@ package config
 
 import (
     "fmt"
+    "log/slog"
     "os"
+    "strings"
     "sync/atomic"
     "time"
 
     "github.com/BurntSushi/toml"
     "github.com/google/uuid"
-    "log/slog"
 
     "asika/common/models"
 )
 
 var (
-    // current holds the current configuration atomically
     current atomic.Value
-    // ConfigPath is the path to the config file
     ConfigPath string
 )
+
+// Store stores the configuration atomically
+func Store(cfg *models.Config) {
+    current.Store(cfg)
+}
 
 // Current returns the current configuration
 func Current() *models.Config {
@@ -27,11 +31,6 @@ func Current() *models.Config {
         return nil
     }
     return v.(*models.Config)
-}
-
-// Store stores the configuration atomically
-func Store(cfg *models.Config) {
-    current.Store(cfg)
 }
 
 // Load loads configuration from the TOML file
@@ -49,6 +48,7 @@ func Load(path string) (*models.Config, error) {
         },
         MergeQueue: models.MergeQueueConfig{
             RequiredApprovals: 1,
+            CICheckRequired:   true,
         },
     }
 
@@ -112,29 +112,37 @@ func GetRepoGroups(cfg *models.Config) []models.RepoGroup {
     if cfg.Mode == "single" {
         return []models.RepoGroup{
             {
-                Name:          "default",
-                GitHub:        cfg.SingleRepo.Repo,
-                GitLab:        cfg.SingleRepo.Repo,
-                Gitea:         cfg.SingleRepo.Repo,
-                DefaultBranch: cfg.SingleRepo.DefaultBranch,
-                HookPath:      cfg.SingleRepo.HookPath,
-                CIProvider:    cfg.SingleRepo.CIProvider,
-                MergeQueue:    cfg.MergeQueue,
+                Name:           "default",
+                Mode:           "single",
+                MirrorPlatform: cfg.SingleRepo.Platform,
+                GitHub:         cfg.SingleRepo.Repo,
+                GitLab:         cfg.SingleRepo.Repo,
+                Gitea:          cfg.SingleRepo.Repo,
+                DefaultBranch:  cfg.SingleRepo.DefaultBranch,
+                HookPath:       cfg.SingleRepo.HookPath,
+                CIProvider:     cfg.SingleRepo.CIProvider,
+                MergeQueue:     cfg.MergeQueue,
             },
         }
     }
 
     groups := make([]models.RepoGroup, len(cfg.RepoGroups))
     for i, rg := range cfg.RepoGroups {
+        mode := rg.Mode
+        if mode == "" {
+            mode = cfg.Mode
+        }
         groups[i] = models.RepoGroup{
-            Name:          rg.Name,
-            GitHub:        rg.GitHub,
-            GitLab:        rg.GitLab,
-            Gitea:         rg.Gitea,
-            DefaultBranch: rg.DefaultBranch,
-            HookPath:      rg.HookPath,
-            CIProvider:    rg.CIProvider,
-            MergeQueue:    rg.MergeQueue,
+            Name:           rg.Name,
+            Mode:           mode,
+            MirrorPlatform: "",
+            GitHub:         rg.GitHub,
+            GitLab:         rg.GitLab,
+            Gitea:          rg.Gitea,
+            DefaultBranch:  rg.DefaultBranch,
+            HookPath:       rg.HookPath,
+            CIProvider:     rg.CIProvider,
+            MergeQueue:     rg.MergeQueue,
         }
     }
     return groups
@@ -149,6 +157,27 @@ func GetRepoGroupByName(cfg *models.Config, name string) *models.RepoGroup {
         }
     }
     return nil
+}
+
+// GetOwnerRepoFromGroup returns the owner/repo for a platform in a repo group
+func GetOwnerRepoFromGroup(group *models.RepoGroup, platform string) (owner, repo string) {
+    var repoPath string
+    switch platform {
+    case "github":
+        repoPath = group.GitHub
+    case "gitlab":
+        repoPath = group.GitLab
+    case "gitea":
+        repoPath = group.Gitea
+    }
+    if repoPath == "" {
+        return "", ""
+    }
+    idx := strings.LastIndex(repoPath, "/")
+    if idx < 0 {
+        return "", repoPath
+    }
+    return repoPath[:idx], repoPath[idx+1:]
 }
 
 // GenerateTokenExpiry parses the token expiry duration

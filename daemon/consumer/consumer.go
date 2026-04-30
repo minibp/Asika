@@ -1,24 +1,51 @@
 package consumer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"asika/common/config"
 	"asika/common/db"
 	"asika/common/events"
+	"asika/common/models"
+	"asika/common/platforms"
+	"asika/daemon/labeler"
+	"asika/daemon/queue"
+	"asika/daemon/syncer"
 )
 
 // Consumer consumes events and processes them
 type Consumer struct {
-	stop chan struct{}
+	cfg     *models.Config
+	clients map[platforms.PlatformType]platforms.PlatformClient
+	labeler *labeler.Labeler
+	syncer  *syncer.Syncer
+	queue   *queue.Manager
+	stop    chan struct{}
 }
 
-// NewConsumer creates a new event consumer
+// NewConsumer creates a new event consumer (basic, no wiring)
 func NewConsumer() *Consumer {
 	return &Consumer{
 		stop: make(chan struct{}),
+	}
+}
+
+// NewConsumerWithClients creates a fully wired event consumer
+func NewConsumerWithClients(cfg *models.Config, clients map[platforms.PlatformType]platforms.PlatformClient) *Consumer {
+	l := labeler.NewLabeler(clients)
+	s := syncer.NewSyncer(cfg, clients)
+	q := queue.NewManager(cfg, clients)
+	return &Consumer{
+		cfg:     cfg,
+		clients: clients,
+		labeler: l,
+		syncer:  s,
+		queue:   q,
+		stop:    make(chan struct{}),
 	}
 }
 
@@ -57,6 +84,8 @@ func (c *Consumer) handleEvent(event events.Event) {
 		c.handlePRApproved(event)
 	case events.EventSpamDetected:
 		c.handleSpamDetected(event)
+	case events.EventPRLabeled:
+		slog.Info("PR labeled", "repo_group", event.RepoGroup)
 	}
 }
 
@@ -68,10 +97,17 @@ func (c *Consumer) handlePROpened(event events.Event) {
 
 	slog.Info("PR opened", "title", pr.Title, "author", pr.Author)
 
-	// TODO:
-	// 1. Store in bbolt (bucket: prs)
+	// 1. Store in bbolt
+	pr.CreatedAt = time.Now()
+	pr.UpdatedAt = time.Now()
+	key := fmt.Sprintf("%s#%s#%d", event.RepoGroup, event.Platform, pr.PRNumber)
+	data, _ := json.Marshal(pr)
+	db.Put(db.BucketPRs, key, data)
+
 	// 2. Trigger label rule engine
-	// 3. Record PREvent to PR's Events list
+	if c.labeler != nil {
+		c.labeler.HandlePROpened(pr, event.RepoGroup)
+	}
 }
 
 func (c *Consumer) handlePRClosed(event events.Event) {
@@ -105,7 +141,13 @@ func (c *Consumer) handlePRMerged(event events.Event) {
 	data, _ := json.Marshal(pr)
 	db.Put(db.BucketPRs, key, data)
 
-	// TODO: trigger code sync (multi mode only)
+	// Trigger code sync (multi mode only)
+	if c.syncer != nil {
+		ctx := context.Background()
+		if err := c.syncer.SyncOnMerge(ctx, pr); err != nil {
+			slog.Error("sync failed", "error", err, "repo_group", event.RepoGroup)
+		}
+	}
 }
 
 func (c *Consumer) handlePRApproved(event events.Event) {
@@ -116,9 +158,14 @@ func (c *Consumer) handlePRApproved(event events.Event) {
 
 	slog.Info("PR approved", "title", pr.Title)
 
-	// Check if PR should be added to merge queue
-	// TODO: implement queue.AddToQueue logic
-	// queue.AddToQueue(pr, event.RepoGroup)
+	// Add to merge queue if not already there
+	if c.queue != nil {
+		if err := c.queue.AddToQueue(pr); err != nil {
+			slog.Error("failed to add PR to queue", "error", err, "pr_id", pr.ID)
+		} else {
+			slog.Info("PR added to merge queue", "pr_id", pr.ID, "repo_group", pr.RepoGroup)
+		}
+	}
 }
 
 func (c *Consumer) handleSpamDetected(event events.Event) {
@@ -129,8 +176,26 @@ func (c *Consumer) handleSpamDetected(event events.Event) {
 
 	slog.Warn("spam detected", "title", pr.Title, "author", pr.Author)
 
-	// TODO: handle spam (close PR, notify admin)
-	// 1. Update PR state to spam
-	// 2. Call platform client to close PR
-	// 3. Send notifications
+	// Mark as spam in bbolt
+	pr.SpamFlag = true
+	pr.State = "spam"
+	pr.UpdatedAt = time.Now()
+	key := fmt.Sprintf("%s#%s#%d", event.RepoGroup, event.Platform, pr.PRNumber)
+	data, _ := json.Marshal(pr)
+	db.Put(db.BucketPRs, key, data)
+
+	// Close PR via platform client
+	if c.clients != nil {
+		client := c.clients[platforms.PlatformType(pr.Platform)]
+		if client != nil {
+			group := config.GetRepoGroupByName(c.cfg, pr.RepoGroup)
+			if group != nil {
+				owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+				ctx := context.Background()
+				if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+					slog.Error("failed to close spam PR", "error", err)
+				}
+			}
+		}
+	}
 }

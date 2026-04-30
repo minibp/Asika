@@ -5,6 +5,7 @@ import (
     "os"
     "os/signal"
     "syscall"
+    "time"
 
     "asika/common/auth"
     "asika/common/config"
@@ -13,7 +14,9 @@ import (
     "asika/common/platforms"
     "asika/daemon/consumer"
     "asika/daemon/polling"
+    "asika/daemon/queue"
     "asika/daemon/server"
+    "asika/daemon/syncer"
 )
 
 func main() {
@@ -28,7 +31,6 @@ func main() {
     // If config doesn't exist, start server in initialization mode
     if err != nil {
         slog.Warn("config not found, starting in initialization mode", "error", err)
-        // Start server with nil config - wizard routes will be available
         srv := server.NewServer(nil)
         slog.Info("asikad starting in initialization mode")
         if err := srv.Start(); err != nil {
@@ -55,7 +57,7 @@ func main() {
         clients[platforms.PlatformGitHub] = platforms.NewGitHubClient(cfg.Tokens.GitHub)
     }
     if cfg.Tokens.GitLab != "" {
-        clients[platforms.PlatformGitLab] = platforms.NewGitLabClient(cfg.Tokens.GitLab)
+        clients[platforms.PlatformGitLab] = platforms.NewGitLabClient(cfg.Tokens.GitLab, "")
     }
     if cfg.Tokens.Gitea != "" {
         clients[platforms.PlatformGitea] = platforms.NewGiteaClient("https://gitea.example.com", cfg.Tokens.Gitea)
@@ -72,6 +74,30 @@ func main() {
         platforms.ExitOnCheckFailed(err)
     }
 
+    // Start merge queue manager and periodic checker
+    queueMgr := queue.NewManager(cfg, clients)
+    go func() {
+        ticker := time.NewTicker(30 * time.Second)
+        for range ticker.C {
+            queueMgr.CheckQueue()
+        }
+    }()
+    slog.Info("merge queue checker started")
+
+    // Start spam detector periodic scan
+    spamDetector := syncer.NewSpamDetectorWithClients(cfg, clients)
+    go func() {
+        if !cfg.Spam.Enabled {
+            return
+        }
+        window := parseDurationDefault(cfg.Spam.TimeWindow, 10*time.Minute)
+        ticker := time.NewTicker(window / 2)
+        for range ticker.C {
+            spamDetector.Scan()
+        }
+    }()
+    slog.Info("spam detector started", "enabled", cfg.Spam.Enabled)
+
     // Start poller if in polling mode
     if cfg.Events.Mode == "polling" {
         poller := polling.NewPoller(cfg, clients)
@@ -79,8 +105,8 @@ func main() {
         slog.Info("poller started")
     }
 
-    // Start event consumer
-    eventConsumer := consumer.NewConsumer()
+    // Start event consumer (with clients for wiring)
+    eventConsumer := consumer.NewConsumerWithClients(cfg, clients)
     go eventConsumer.Start()
     slog.Info("event consumer started")
 
@@ -111,4 +137,13 @@ func setupSIGHUPHandler() {
             slog.Info("config reloaded successfully")
         }
     }()
+}
+
+// parseDurationDefault parses a duration with a fallback
+func parseDurationDefault(s string, defaultDur time.Duration) time.Duration {
+    d, err := time.ParseDuration(s)
+    if err != nil {
+        return defaultDur
+    }
+    return d
 }

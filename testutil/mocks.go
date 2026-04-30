@@ -14,15 +14,17 @@ type MockPlatformClient struct {
     DefaultMethod string
     Approvals     []string
     CIStatus      string
+    DiffFiles     []string
     Err           error
 }
 
 // NewMockPlatformClient creates a new mock client
 func NewMockPlatformClient() *MockPlatformClient {
     return &MockPlatformClient{
-        PRs:      make(map[string]*models.PRRecord),
+        PRs:       make(map[string]*models.PRRecord),
         Approvals: make([]string, 0),
         CIStatus:  "success",
+        DiffFiles: []string{"main.go", "README.md"},
     }
 }
 
@@ -54,7 +56,7 @@ func (m *MockPlatformClient) ApprovePR(ctx context.Context, owner, repo string, 
     return m.Err
 }
 
-func (m *MockPlatformClient) MergePR(ctx context.Context, owner, repo string, number int) error {
+func (m *MockPlatformClient) MergePR(ctx context.Context, owner, repo string, number int, method string) error {
     return m.Err
 }
 
@@ -112,4 +114,8 @@ func (m *MockPlatformClient) VerifyWebhookSignature(body []byte, signature strin
 
 func (m *MockPlatformClient) GetPRCommits(ctx context.Context, owner, repo string, number int) ([]string, error) {
     return []string{"abc123"}, m.Err
+}
+
+func (m *MockPlatformClient) GetDiffFiles(ctx context.Context, owner, repo string, number int) ([]string, error) {
+    return m.DiffFiles, m.Err
 }

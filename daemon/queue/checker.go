@@ -1,155 +1,168 @@
 package queue
 
 import (
-    "context"
-    "encoding/json"
-    "fmt"
+	"context"
+	"encoding/json"
+	"fmt"
 
-    "asika/common/config"
-    "asika/common/db"
-    "asika/common/models"
-    "asika/common/platforms"
+	"asika/common/config"
+	"asika/common/db"
+	"asika/common/models"
+	"asika/common/platforms"
 )
 
 // Checker checks if a queue item is ready to merge
 type Checker struct {
-    cfg     *models.Config
-    clients map[platforms.PlatformType]platforms.PlatformClient
+	cfg     *models.Config
+	clients map[platforms.PlatformType]platforms.PlatformClient
 }
 
 // NewChecker creates a new checker
 func NewChecker(cfg *models.Config, clients map[platforms.PlatformType]platforms.PlatformClient) *Checker {
-    return &Checker{
-        cfg:     cfg,
-        clients: clients,
-    }
+	return &Checker{
+		cfg:     cfg,
+		clients: clients,
+	}
 }
 
 // ShouldMerge checks if a queue item should be merged
 func (c *Checker) ShouldMerge(item *models.QueueItem) (bool, error) {
-    ctx := context.Background()
+	ctx := context.Background()
 
-    // Get PR
-    pr, err := getPRFromDB(item.RepoGroup, item.PRID)
-    if err != nil {
-        return false, err
-    }
+	pr, err := getPRFromDB(item.RepoGroup, item.PRID)
+	if err != nil {
+		return false, err
+	}
 
-    // Check approvals
-    approved, err := c.checkApprovals(ctx, pr)
-    if err != nil {
-        return false, err
-    }
-    if !approved {
-        return false, nil
-    }
+	// Get repo group config
+	group := config.GetRepoGroupByName(c.cfg, pr.RepoGroup)
+	if group == nil {
+		return false, fmt.Errorf("repo group not found: %s", pr.RepoGroup)
+	}
 
-    // Check CI
-    ciPassed, err := c.checkCI(ctx, pr)
-    if err != nil {
-        return false, err
-    }
-    if !ciPassed {
-        return false, nil
-    }
+	// Check approvals
+	approved, approvals, err := c.checkApprovals(ctx, pr, group)
+	if err != nil {
+		return false, err
+	}
+	if !approved {
+		return false, nil
+	}
 
-    return true, nil
+	// Check CI (skip if ci_check_required is false or ci_provider is "none")
+	if group.MergeQueue.CICheckRequired && group.CIProvider != "none" {
+		ciPassed, ciStatus, err := c.checkCI(ctx, pr, group)
+		if err != nil {
+			return false, err
+		}
+		if !ciPassed {
+			// Update criteria snapshot
+			item.Criteria = models.MergeCriteria{
+				RequiredApprovals: group.MergeQueue.RequiredApprovals,
+				ApprovedBy:        approvals,
+				CIStatus:          ciStatus,
+			}
+			return false, nil
+		}
+	}
+
+	// Update criteria snapshot
+	item.Criteria = models.MergeCriteria{
+		RequiredApprovals: group.MergeQueue.RequiredApprovals,
+		ApprovedBy:        approvals,
+		CIStatus:          "success",
+	}
+
+	return true, nil
 }
 
-// checkApprovals checks if the PR has enough approvals
-func (c *Checker) checkApprovals(ctx context.Context, pr *models.PRRecord) (bool, error) {
-    // Get repo group config for core contributors
-    group := config.GetRepoGroupByName(c.cfg, pr.RepoGroup)
-    if group == nil {
-        return false, fmt.Errorf("repo group not found: %s", pr.RepoGroup)
-    }
+// checkApprovals checks if the PR has enough approvals from core contributors
+func (c *Checker) checkApprovals(ctx context.Context, pr *models.PRRecord, group *models.RepoGroup) (bool, []string, error) {
+	client := c.clients[platforms.PlatformType(pr.Platform)]
+	if client == nil {
+		return false, nil, fmt.Errorf("no client for platform: %s", pr.Platform)
+	}
 
-    // Get platform client
-    client := c.clients[platforms.PlatformType(pr.Platform)]
-    if client == nil {
-        return false, fmt.Errorf("no client for platform: %s", pr.Platform)
-    }
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	if owner == "" || repo == "" {
+		return false, nil, fmt.Errorf("cannot resolve repo for platform %s in group %s", pr.Platform, group.Name)
+	}
 
-    // Get approvals from platform
-    parts := splitRepoName(pr.RepoGroup)
-    if len(parts) != 2 {
-        return false, fmt.Errorf("invalid repo group: %s", pr.RepoGroup)
-    }
+	approvals, err := client.GetApprovals(ctx, owner, repo, pr.PRNumber)
+	if err != nil {
+		return false, nil, err
+	}
 
-    approvals, err := client.GetApprovals(ctx, parts[0], parts[1], pr.PRNumber)
-    if err != nil {
-        return false, err
-    }
+	// Check if core contributors approved
+	coreApproved := make([]string, 0)
+	for _, approver := range approvals {
+		if contains(group.MergeQueue.CoreContributors, approver) {
+			coreApproved = append(coreApproved, approver)
+		}
+	}
 
-    // Check if core contributors approved
-    approvedCount := 0
-    for _, approver := range approvals {
-        if contains(group.MergeQueue.CoreContributors, approver) {
-            approvedCount++
-        }
-    }
-
-    return approvedCount >= group.MergeQueue.RequiredApprovals, nil
+	return len(coreApproved) >= group.MergeQueue.RequiredApprovals, coreApproved, nil
 }
 
 // checkCI checks if CI passed
-func (c *Checker) checkCI(ctx context.Context, pr *models.PRRecord) (bool, error) {
-    group := config.GetRepoGroupByName(c.cfg, pr.RepoGroup)
-    if group == nil {
-        return false, fmt.Errorf("repo group not found: %s", pr.RepoGroup)
-    }
+func (c *Checker) checkCI(ctx context.Context, pr *models.PRRecord, group *models.RepoGroup) (bool, string, error) {
+	client := c.clients[platforms.PlatformType(pr.Platform)]
+	if client == nil {
+		return false, "none", fmt.Errorf("no client for platform: %s", pr.Platform)
+	}
 
-    // If CI provider is none, skip check
-    if group.CIProvider == "none" {
-        return true, nil
-    }
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	if owner == "" || repo == "" {
+		return false, "none", fmt.Errorf("cannot resolve repo for platform %s", pr.Platform)
+	}
 
-    // Get platform client
-    client := c.clients[platforms.PlatformType(pr.Platform)]
-    if client == nil {
-        return false, fmt.Errorf("no client for platform: %s", pr.Platform)
-    }
+	// Get the latest commit SHA from the PR
+	commits, err := client.GetPRCommits(ctx, owner, repo, pr.PRNumber)
+	if err != nil {
+		return false, "none", err
+	}
+	if len(commits) == 0 {
+		return true, "none", nil
+	}
 
-    // Get CI status
-    parts := splitRepoName(pr.RepoGroup)
-    if len(parts) != 2 {
-        return false, fmt.Errorf("invalid repo group: %s", pr.RepoGroup)
-    }
+	lastCommit := commits[len(commits)-1]
+	status, err := client.GetCIStatus(ctx, owner, repo, lastCommit)
+	if err != nil {
+		return false, "none", err
+	}
 
-    status, err := client.GetCIStatus(ctx, parts[0], parts[1], pr.MergeCommitSHA)
-    if err != nil {
-        return false, err
-    }
-
-    return status == "success", nil
+	return status == "success", status, nil
 }
 
-// getPRFromDB gets a PR from the database
 func getPRFromDB(repoGroup, prID string) (*models.PRRecord, error) {
-    data, err := db.Get(db.BucketPRs, repoGroup+"#"+prID)
-    if err != nil {
-        return nil, err
-    }
-
-    var pr models.PRRecord
-    if err := json.Unmarshal(data, &pr); err != nil {
-        return nil, err
-    }
-
-    return &pr, nil
+	// Try to find PR by iterating through the bucket
+	var pr *models.PRRecord
+	err := db.ForEach(db.BucketPRs, func(key, value []byte) error {
+		var record models.PRRecord
+		if err := json.Unmarshal(value, &record); err != nil {
+			return err
+		}
+		if record.RepoGroup == repoGroup && record.ID == prID {
+			pr = &record
+			return nil
+		}
+		// Also try matching by PR number as key format is repoGroup#platform#prNumber
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if pr == nil {
+		return nil, fmt.Errorf("PR not found: %s/%s", repoGroup, prID)
+	}
+	return pr, nil
 }
 
-// splitRepoName splits a repo group name to get owner/repo
-func splitRepoName(repoGroup string) []string {
-    return []string{"owner", "repo"}
-}
-
-// contains checks if a string slice contains a value
-func contains(slice []string, value string) bool {
-    for _, v := range slice {
-        if v == value {
-            return true
-        }
-    }
-    return false
+func contains(list []string, item string) bool {
+	for _, s := range list {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }

@@ -1,166 +1,406 @@
 package platforms
 
 import (
-    "context"
-    "fmt"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
 
-    "code.gitea.io/sdk/gitea"
+	"code.gitea.io/sdk/gitea"
 
-    "asika/common/models"
+	"asika/common/models"
 )
 
-// GiteaClient implements PlatformClient for Gitea
+// GiteaClient implements PlatformClient for Gitea/Forgejo
 type GiteaClient struct {
-    client *gitea.Client
-    token  string
+	client  *gitea.Client
+	token   string
+	baseURL string
 }
 
 // NewGiteaClient creates a new Gitea client
 func NewGiteaClient(baseURL, token string) *GiteaClient {
-    client, _ := gitea.NewClient(baseURL, gitea.SetToken(token))
-    return &GiteaClient{
-        client: client,
-        token:  token,
-    }
+	client, err := gitea.NewClient(baseURL, gitea.SetToken(token))
+	if err != nil {
+		client, _ = gitea.NewClient(baseURL, gitea.SetToken(token))
+	}
+
+	return &GiteaClient{
+		client:  client,
+		token:   token,
+		baseURL: baseURL,
+	}
 }
 
 // GetPR retrieves a pull request
 func (c *GiteaClient) GetPR(ctx context.Context, owner, repo string, number int) (*models.PRRecord, error) {
-    return nil, fmt.Errorf("not implemented")
+	pr, _, err := c.client.GetPullRequest(owner, repo, int64(number))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR: %w", err)
+	}
+
+	return giteaPRToRecord(pr), nil
 }
 
 // ListPRs lists pull requests
 func (c *GiteaClient) ListPRs(ctx context.Context, owner, repo string, state string) ([]*models.PRRecord, error) {
-    opts := gitea.ListPullRequestsOptions{
-        State: gitea.StateType(state),
-        ListOptions: gitea.ListOptions{Page: 1, PageSize: 100},
-    }
+	opts := gitea.ListPullRequestsOptions{
+		State: gitea.StateType(state),
+		ListOptions: gitea.ListOptions{Page: 1, PageSize: 100},
+	}
 
-    var result []*models.PRRecord
-    for {
-        prs, _, err := c.client.ListRepoPullRequests(owner, repo, opts)
-        if err != nil {
-            return nil, fmt.Errorf("failed to list PRs: %w", err)
-        }
+	var result []*models.PRRecord
+	for {
+		prs, _, err := c.client.ListRepoPullRequests(owner, repo, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list PRs: %w", err)
+		}
 
-        if len(prs) == 0 {
-            break
-        }
+		if len(prs) == 0 {
+			break
+		}
 
-        for _, pr := range prs {
-            record := &models.PRRecord{
-                ID:           fmt.Sprintf("%d", pr.ID),
-                RepoGroup:    "",
-                Platform:      "gitea",
-                PRNumber:     int(pr.Index),
-                Title:        pr.Title,
-                Author:       pr.Poster.UserName,
-                State:        string(pr.State),
-                Labels:       extractGiteaLabels(pr.Labels),
-                MergeCommitSHA: "",
-                SpamFlag:     false,
-                UpdatedAt:    *pr.Created,
-                Events:       []models.PREvent{},
-            }
-            result = append(result, record)
-        }
+		for _, pr := range prs {
+			result = append(result, giteaPRToRecord(pr))
+		}
 
-        if len(prs) < 100 {
-            break
-        }
-        opts.Page++
-    }
+		if len(prs) < 100 {
+			break
+		}
+		opts.Page++
+	}
 
-    return result, nil
+	return result, nil
+}
+
+func giteaPRToRecord(pr *gitea.PullRequest) *models.PRRecord {
+	state := "open"
+	if pr.HasMerged {
+		state = "merged"
+	} else if pr.State == gitea.StateClosed {
+		state = "closed"
+	}
+
+	var mergeCommitSHA string
+	if pr.MergedCommitID != nil {
+		mergeCommitSHA = *pr.MergedCommitID
+	}
+
+	return &models.PRRecord{
+		ID:             fmt.Sprintf("%d", pr.ID),
+		Platform:       "gitea",
+		PRNumber:       int(pr.Index),
+		Title:          pr.Title,
+		Author:         pr.Poster.UserName,
+		State:          state,
+		Labels:         extractGiteaLabels(pr.Labels),
+		MergeCommitSHA: mergeCommitSHA,
+		SpamFlag:       false,
+		CreatedAt:      *pr.Created,
+		UpdatedAt:      *pr.Updated,
+		Events:         []models.PREvent{},
+	}
 }
 
 func extractGiteaLabels(labels []*gitea.Label) []string {
-    result := make([]string, 0, len(labels))
-    for _, l := range labels {
-        result = append(result, l.Name)
-    }
-    return result
+	result := make([]string, 0, len(labels))
+	for _, l := range labels {
+		result = append(result, l.Name)
+	}
+	return result
 }
 
 // ApprovePR approves a pull request
 func (c *GiteaClient) ApprovePR(ctx context.Context, owner, repo string, number int) error {
-    return fmt.Errorf("not implemented")
+	_, _, err := c.client.CreatePullReview(owner, repo, int64(number), gitea.CreatePullReviewOptions{
+		State: gitea.ReviewStateApproved,
+		Body:  "Approved by Asika",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to approve PR: %w", err)
+	}
+	return nil
 }
 
 // MergePR merges a pull request
-func (c *GiteaClient) MergePR(ctx context.Context, owner, repo string, number int) error {
-    return fmt.Errorf("not implemented")
+func (c *GiteaClient) MergePR(ctx context.Context, owner, repo string, number int, method string) error {
+	style := gitea.MergeStyleMerge
+	switch strings.ToLower(method) {
+	case "squash":
+		style = gitea.MergeStyleSquash
+	case "rebase":
+		style = gitea.MergeStyleRebase
+	case "rebase-merge":
+		style = gitea.MergeStyleRebaseMerge
+	}
+
+	_, _, err := c.client.MergePullRequest(owner, repo, int64(number), gitea.MergePullRequestOption{
+		Style: style,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to merge PR: %w", err)
+	}
+	return nil
 }
 
 // ClosePR closes a pull request
 func (c *GiteaClient) ClosePR(ctx context.Context, owner, repo string, number int) error {
-    return fmt.Errorf("not implemented")
+	stateClosed := gitea.StateClosed
+	_, _, err := c.client.EditPullRequest(owner, repo, int64(number), gitea.EditPullRequestOption{
+		State: &stateClosed,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to close PR: %w", err)
+	}
+	return nil
 }
 
 // ReopenPR reopens a pull request
 func (c *GiteaClient) ReopenPR(ctx context.Context, owner, repo string, number int) error {
-    return fmt.Errorf("not implemented")
+	stateOpen := gitea.StateOpen
+	_, _, err := c.client.EditPullRequest(owner, repo, int64(number), gitea.EditPullRequestOption{
+		State: &stateOpen,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to reopen PR: %w", err)
+	}
+	return nil
 }
 
-// CommentPR adds a comment to a pull request
+// CommentPR adds a comment to a pull request (uses issue comment API)
 func (c *GiteaClient) CommentPR(ctx context.Context, owner, repo string, number int, body string) error {
-    return fmt.Errorf("not implemented")
+	_, _, err := c.client.CreateIssueComment(owner, repo, int64(number), gitea.CreateIssueCommentOption{
+		Body: body,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to comment on PR: %w", err)
+	}
+	return nil
 }
 
 // AddLabel adds a label to a pull request
 func (c *GiteaClient) AddLabel(ctx context.Context, owner, repo string, number int, label string) error {
-    return fmt.Errorf("not implemented")
+	// Find or create the label first
+	labels, _, err := c.client.ListRepoLabels(owner, repo, gitea.ListLabelsOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list labels: %w", err)
+	}
+
+	var labelID int64
+	for _, l := range labels {
+		if l.Name == label {
+			labelID = l.ID
+			break
+		}
+	}
+
+	if labelID == 0 {
+		// Create the label
+		newLabel, _, err := c.client.CreateLabel(owner, repo, gitea.CreateLabelOption{
+			Name:  label,
+			Color: "#ededed",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create label: %w", err)
+		}
+		labelID = newLabel.ID
+	}
+
+	_, _, err = c.client.AddIssueLabels(owner, repo, int64(number), gitea.IssueLabelsOption{
+		Labels: []int64{labelID},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to add label: %w", err)
+	}
+	return nil
 }
 
 // RemoveLabel removes a label from a pull request
 func (c *GiteaClient) RemoveLabel(ctx context.Context, owner, repo string, number int, label string) error {
-    return fmt.Errorf("not implemented")
+	labels, _, err := c.client.ListRepoLabels(owner, repo, gitea.ListLabelsOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list labels: %w", err)
+	}
+
+	for _, l := range labels {
+		if l.Name == label {
+			_, err = c.client.DeleteIssueLabel(owner, repo, int64(number), l.ID)
+			if err != nil {
+				return fmt.Errorf("failed to remove label: %w", err)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("label not found: %s", label)
 }
 
 // GetBranch checks if a branch exists
 func (c *GiteaClient) GetBranch(ctx context.Context, owner, repo, branch string) (bool, error) {
-    return false, fmt.Errorf("not implemented")
+	_, _, err := c.client.GetRepoBranch(owner, repo, branch)
+	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check branch: %w", err)
+	}
+	return true, nil
 }
 
 // DeleteBranch deletes a branch
 func (c *GiteaClient) DeleteBranch(ctx context.Context, owner, repo, branch string) error {
-    return fmt.Errorf("not implemented")
+	_, _, err := c.client.DeleteRepoBranch(owner, repo, branch)
+	if err != nil {
+		return fmt.Errorf("failed to delete branch: %w", err)
+	}
+	return nil
 }
 
 // GetDefaultBranch gets the default branch
 func (c *GiteaClient) GetDefaultBranch(ctx context.Context, owner, repo string) (string, error) {
-    return "main", nil
+	r, _, err := c.client.GetRepo(owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo: %w", err)
+	}
+	return r.DefaultBranch, nil
 }
 
 // GetCIStatus gets the CI status
 func (c *GiteaClient) GetCIStatus(ctx context.Context, owner, repo string, commitSHA string) (string, error) {
-    return "success", nil
+	statuses, _, err := c.client.GetCombinedStatus(owner, repo, commitSHA)
+	if err != nil || statuses == nil {
+		return "none", nil
+	}
+
+	switch statuses.State {
+	case gitea.StatusSuccess:
+		return "success", nil
+	case gitea.StatusFailure, gitea.StatusError, gitea.StatusWarning:
+		return "failure", nil
+	case gitea.StatusPending:
+		return "pending", nil
+	default:
+		return "none", nil
+	}
 }
 
 // GetDefaultMergeMethod gets the default merge method
 func (c *GiteaClient) GetDefaultMergeMethod(ctx context.Context, owner, repo string) (string, error) {
-    return "merge", nil
+	r, _, err := c.client.GetRepo(owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo: %w", err)
+	}
+
+	// Determine default based on what's allowed
+	if r.AllowSquash {
+		return "squash", nil
+	}
+	if r.AllowMerge {
+		return "merge", nil
+	}
+	if r.AllowRebase {
+		return "rebase", nil
+	}
+	return "merge", nil
 }
 
 // HasMultipleMergeMethods checks if multiple merge methods are available
 func (c *GiteaClient) HasMultipleMergeMethods(ctx context.Context, owner, repo string) (bool, error) {
-    // Gitea/Forgejo typically supports merge, squash, rebase
-    // TODO: check actual repo settings via API
-    // For now, assume single method
-    return false, nil
+	r, _, err := c.client.GetRepo(owner, repo)
+	if err != nil {
+		return false, fmt.Errorf("failed to get repo: %w", err)
+	}
+
+	methods := 0
+	if r.AllowMerge {
+		methods++
+	}
+	if r.AllowSquash {
+		methods++
+	}
+	if r.AllowRebase {
+		methods++
+	}
+	if r.AllowRebaseMerge {
+		methods++
+	}
+
+	return methods > 1, nil
 }
 
 // GetApprovals gets the list of approvers
 func (c *GiteaClient) GetApprovals(ctx context.Context, owner, repo string, number int) ([]string, error) {
-    return nil, fmt.Errorf("not implemented")
+	reviews, _, err := c.client.ListPullReviews(owner, repo, int64(number), gitea.ListPullReviewsOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list reviews: %w", err)
+	}
+
+	var approvers []string
+	for _, review := range reviews {
+		if review.State == gitea.ReviewStateApproved && review.Reviewer != nil {
+			approvers = append(approvers, review.Reviewer.UserName)
+		}
+	}
+	return approvers, nil
 }
 
-// VerifyWebhookSignature verifies the webhook signature
+// VerifyWebhookSignature verifies the webhook signature using HMAC-SHA256
 func (c *GiteaClient) VerifyWebhookSignature(body []byte, signature string) bool {
-    return true
+	if c.token == "" {
+		return false
+	}
+
+	mac := hmac.New(sha256.New, []byte(c.token))
+	mac.Write(body)
+	expectedMAC := hex.EncodeToString(mac.Sum(nil))
+
+	return hmac.Equal([]byte(signature), []byte(expectedMAC))
 }
 
 // GetPRCommits gets the commits in a PR
+// v0.13.2 doesn't have GetPullRequestCommits, so we get the merge/head SHA from GetPR
 func (c *GiteaClient) GetPRCommits(ctx context.Context, owner, repo string, number int) ([]string, error) {
-    return nil, fmt.Errorf("not implemented")
+	pr, _, err := c.client.GetPullRequest(owner, repo, int64(number))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR: %w", err)
+	}
+
+	var shas []string
+	if pr.MergedCommitID != nil {
+		shas = append(shas, *pr.MergedCommitID)
+	}
+	if pr.Head != nil {
+		shas = append(shas, pr.Head.Sha)
+	}
+	return shas, nil
+}
+
+// GetDiffFiles gets the changed files in a PR
+// v0.13.2 doesn't have a structured diff files API, so we parse the raw diff
+func (c *GiteaClient) GetDiffFiles(ctx context.Context, owner, repo string, number int) ([]string, error) {
+	diff, _, err := c.client.GetPullRequestDiff(owner, repo, int64(number))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR diff: %w", err)
+	}
+
+	// Parse the diff to extract file names
+	return parseDiffFiles(string(diff)), nil
+}
+
+// parseDiffFiles extracts file names from a raw diff
+func parseDiffFiles(diff string) []string {
+	files := make([]string, 0)
+	lines := strings.Split(diff, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git a/") {
+			// Format: "diff --git a/path/to/file b/path/to/file"
+			parts := strings.SplitN(line, " b/", 2)
+			if len(parts) == 2 {
+				filePath := strings.TrimPrefix(parts[0], "diff --git a/")
+				files = append(files, filePath)
+			}
+		}
+	}
+	return files
 }

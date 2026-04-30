@@ -1,176 +1,344 @@
 package platforms
 
 import (
-    "context"
-    "fmt"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
 
-    "github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v69/github"
 
-    "asika/common/models"
+	"asika/common/models"
 )
 
 // GitHubClient implements PlatformClient for GitHub
 type GitHubClient struct {
-    client *github.Client
-    token  string
+	client *github.Client
+	token  string
 }
 
 // NewGitHubClient creates a new GitHub client
 func NewGitHubClient(token string) *GitHubClient {
-    return &GitHubClient{
-        client: github.NewTokenClient(context.Background(), token),
-        token:  token,
-    }
+	return &GitHubClient{
+		client: github.NewTokenClient(context.Background(), token),
+		token:  token,
+	}
 }
 
 // GetPR retrieves a pull request
 func (c *GitHubClient) GetPR(ctx context.Context, owner, repo string, number int) (*models.PRRecord, error) {
-    return nil, fmt.Errorf("not implemented")
+	pr, _, err := c.client.PullRequests.Get(ctx, owner, repo, number)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR: %w", err)
+	}
+
+	record := &models.PRRecord{
+		ID:             fmt.Sprintf("%d", pr.GetID()),
+		Platform:       "github",
+		PRNumber:       pr.GetNumber(),
+		Title:          pr.GetTitle(),
+		Author:         pr.GetUser().GetLogin(),
+		State:          pr.GetState(),
+		Labels:         extractLabels(pr.Labels),
+		MergeCommitSHA: pr.GetMergeCommitSHA(),
+		SpamFlag:       false,
+		CreatedAt:      pr.GetCreatedAt().Time,
+		UpdatedAt:      pr.GetUpdatedAt().Time,
+		Events:         []models.PREvent{},
+	}
+	return record, nil
 }
 
 // ListPRs lists pull requests
 func (c *GitHubClient) ListPRs(ctx context.Context, owner, repo string, state string) ([]*models.PRRecord, error) {
-    opts := &github.PullRequestListOptions{
-        State: state,
-        ListOptions: github.ListOptions{PerPage: 100},
-    }
+	opts := &github.PullRequestListOptions{
+		State: state,
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
 
-    var result []*models.PRRecord
-    for {
-        prs, resp, err := c.client.PullRequests.List(ctx, owner, repo, opts)
-        if err != nil {
-            return nil, fmt.Errorf("failed to list PRs: %w", err)
-        }
+	var result []*models.PRRecord
+	for {
+		prs, resp, err := c.client.PullRequests.List(ctx, owner, repo, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list PRs: %w", err)
+		}
 
-        for _, pr := range prs {
-            record := &models.PRRecord{
-                ID:           fmt.Sprintf("%d", pr.GetID()),
-                RepoGroup:    "",
-                Platform:      "github",
-                PRNumber:     pr.GetNumber(),
-                Title:        pr.GetTitle(),
-                Author:       pr.GetUser().GetLogin(),
-                State:        pr.GetState(),
-                Labels:       extractLabels(pr.Labels),
-                MergeCommitSHA: pr.GetMergeCommitSHA(),
-                SpamFlag:     false,
-                UpdatedAt:    pr.GetUpdatedAt().Time,
-                Events:       []models.PREvent{},
-            }
-            result = append(result, record)
-        }
+		for _, pr := range prs {
+			record := &models.PRRecord{
+				ID:             fmt.Sprintf("%d", pr.GetID()),
+				Platform:       "github",
+				PRNumber:       pr.GetNumber(),
+				Title:          pr.GetTitle(),
+				Author:         pr.GetUser().GetLogin(),
+				State:          pr.GetState(),
+				Labels:         extractLabels(pr.Labels),
+				MergeCommitSHA: pr.GetMergeCommitSHA(),
+				SpamFlag:       false,
+				CreatedAt:      pr.GetCreatedAt().Time,
+				UpdatedAt:      pr.GetUpdatedAt().Time,
+				Events:         []models.PREvent{},
+			}
+			result = append(result, record)
+		}
 
-        if resp.NextPage == 0 {
-            break
-        }
-        opts.Page = resp.NextPage
-    }
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
 
-    return result, nil
+	return result, nil
 }
 
 func extractLabels(labels []*github.Label) []string {
-    result := make([]string, 0, len(labels))
-    for _, l := range labels {
-        result = append(result, l.GetName())
-    }
-    return result
+	result := make([]string, 0, len(labels))
+	for _, l := range labels {
+		result = append(result, l.GetName())
+	}
+	return result
 }
 
 // ApprovePR approves a pull request
 func (c *GitHubClient) ApprovePR(ctx context.Context, owner, repo string, number int) error {
-    return fmt.Errorf("not implemented")
+	_, _, err := c.client.PullRequests.CreateReview(ctx, owner, repo, number, &github.PullRequestReviewRequest{
+		Event: github.String("APPROVE"),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to approve PR: %w", err)
+	}
+	return nil
 }
 
 // MergePR merges a pull request
-func (c *GitHubClient) MergePR(ctx context.Context, owner, repo string, number int) error {
-    return fmt.Errorf("not implemented")
+func (c *GitHubClient) MergePR(ctx context.Context, owner, repo string, number int, method string) error {
+	mergeMethod := method
+	if mergeMethod == "" {
+		mergeMethod = "merge"
+	}
+
+	opts := &github.PullRequestOptions{
+		MergeMethod: mergeMethod,
+	}
+
+	_, _, err := c.client.PullRequests.Merge(ctx, owner, repo, number, "", opts)
+	if err != nil {
+		return fmt.Errorf("failed to merge PR: %w", err)
+	}
+	return nil
 }
 
 // ClosePR closes a pull request
 func (c *GitHubClient) ClosePR(ctx context.Context, owner, repo string, number int) error {
-    return fmt.Errorf("not implemented")
+	_, _, err := c.client.PullRequests.Edit(ctx, owner, repo, number, &github.PullRequest{
+		State: github.String("closed"),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to close PR: %w", err)
+	}
+	return nil
 }
 
 // ReopenPR reopens a pull request
 func (c *GitHubClient) ReopenPR(ctx context.Context, owner, repo string, number int) error {
-    return fmt.Errorf("not implemented")
+	_, _, err := c.client.PullRequests.Edit(ctx, owner, repo, number, &github.PullRequest{
+		State: github.String("open"),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to reopen PR: %w", err)
+	}
+	return nil
 }
 
-// CommentPR adds a comment to a pull request
+// CommentPR adds a comment to a pull request (via IssuesService)
 func (c *GitHubClient) CommentPR(ctx context.Context, owner, repo string, number int, body string) error {
-    return fmt.Errorf("not implemented")
+	_, _, err := c.client.Issues.CreateComment(ctx, owner, repo, number, &github.IssueComment{
+		Body: github.String(body),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to comment on PR: %w", err)
+	}
+	return nil
 }
 
 // AddLabel adds a label to a pull request
 func (c *GitHubClient) AddLabel(ctx context.Context, owner, repo string, number int, label string) error {
-    return fmt.Errorf("not implemented")
+	_, _, err := c.client.Issues.AddLabelsToIssue(ctx, owner, repo, number, []string{label})
+	if err != nil {
+		return fmt.Errorf("failed to add label: %w", err)
+	}
+	return nil
 }
 
 // RemoveLabel removes a label from a pull request
 func (c *GitHubClient) RemoveLabel(ctx context.Context, owner, repo string, number int, label string) error {
-    return fmt.Errorf("not implemented")
+	_, err := c.client.Issues.RemoveLabelForIssue(ctx, owner, repo, number, label)
+	if err != nil {
+		return fmt.Errorf("failed to remove label: %w", err)
+	}
+	return nil
 }
 
 // GetBranch checks if a branch exists
 func (c *GitHubClient) GetBranch(ctx context.Context, owner, repo, branch string) (bool, error) {
-    return false, fmt.Errorf("not implemented")
+	_, _, err := c.client.Repositories.GetBranch(ctx, owner, repo, branch, 0)
+	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check branch: %w", err)
+	}
+	return true, nil
 }
 
 // DeleteBranch deletes a branch
 func (c *GitHubClient) DeleteBranch(ctx context.Context, owner, repo, branch string) error {
-    return fmt.Errorf("not implemented")
+	_, err := c.client.Git.DeleteRef(ctx, owner, repo, "heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("failed to delete branch: %w", err)
+	}
+	return nil
 }
 
 // GetDefaultBranch gets the default branch
 func (c *GitHubClient) GetDefaultBranch(ctx context.Context, owner, repo string) (string, error) {
-    return "main", nil
+	r, _, err := c.client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo: %w", err)
+	}
+	return r.GetDefaultBranch(), nil
 }
 
 // GetCIStatus gets the CI status
 func (c *GitHubClient) GetCIStatus(ctx context.Context, owner, repo string, commitSHA string) (string, error) {
-    return "success", nil
+	statuses, _, err := c.client.Repositories.GetCombinedStatus(ctx, owner, repo, commitSHA, nil)
+	if err != nil {
+		return "none", nil
+	}
+
+	state := statuses.GetState()
+	switch state {
+	case "success":
+		return "success", nil
+	case "failure", "error":
+		return "failure", nil
+	case "pending":
+		return "pending", nil
+	default:
+		return "none", nil
+	}
 }
 
 // GetDefaultMergeMethod gets the default merge method
 func (c *GitHubClient) GetDefaultMergeMethod(ctx context.Context, owner, repo string) (string, error) {
-    return "merge", nil
+	r, _, err := c.client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo: %w", err)
+	}
+
+	if r.GetAllowSquashMerge() {
+		return "squash", nil
+	}
+	if r.GetAllowMergeCommit() {
+		return "merge", nil
+	}
+	if r.GetAllowRebaseMerge() {
+		return "rebase", nil
+	}
+	return "merge", nil
 }
 
 // HasMultipleMergeMethods checks if multiple merge methods are available
 func (c *GitHubClient) HasMultipleMergeMethods(ctx context.Context, owner, repo string) (bool, error) {
-    // Get repository info to check merge methods
-    r, _, err := c.client.Repositories.Get(ctx, owner, repo)
-    if err != nil {
-        return false, fmt.Errorf("failed to get repo: %w", err)
-    }
+	r, _, err := c.client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return false, fmt.Errorf("failed to get repo: %w", err)
+	}
 
-    // Count available merge methods
-    methods := 0
-    if r.GetAllowMergeCommit() {
-        methods++
-    }
-    if r.GetAllowSquashMerge() {
-        methods++
-    }
-    if r.GetAllowRebaseMerge() {
-        methods++
-    }
+	methods := 0
+	if r.GetAllowMergeCommit() {
+		methods++
+	}
+	if r.GetAllowSquashMerge() {
+		methods++
+	}
+	if r.GetAllowRebaseMerge() {
+		methods++
+	}
 
-    return methods > 1, nil
+	return methods > 1, nil
 }
 
 // GetApprovals gets the list of approvers
 func (c *GitHubClient) GetApprovals(ctx context.Context, owner, repo string, number int) ([]string, error) {
-    return nil, fmt.Errorf("not implemented")
+	reviews, _, err := c.client.PullRequests.ListReviews(ctx, owner, repo, number, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list reviews: %w", err)
+	}
+
+	var approvers []string
+	for _, review := range reviews {
+		if review.GetState() == "APPROVED" {
+			approvers = append(approvers, review.GetUser().GetLogin())
+		}
+	}
+	return approvers, nil
 }
 
-// VerifyWebhookSignature verifies the webhook signature
+// VerifyWebhookSignature verifies the webhook signature using HMAC-SHA256
 func (c *GitHubClient) VerifyWebhookSignature(body []byte, signature string) bool {
-    return true
+	if c.token == "" {
+		return false
+	}
+
+	mac := hmac.New(sha256.New, []byte(c.token))
+	mac.Write(body)
+	expectedMAC := hex.EncodeToString(mac.Sum(nil))
+
+	if strings.HasPrefix(signature, "sha256=") {
+		signature = strings.TrimPrefix(signature, "sha256=")
+	}
+
+	return hmac.Equal([]byte(signature), []byte(expectedMAC))
 }
 
 // GetPRCommits gets the commits in a PR
 func (c *GitHubClient) GetPRCommits(ctx context.Context, owner, repo string, number int) ([]string, error) {
-    return nil, fmt.Errorf("not implemented")
+	opts := &github.ListOptions{PerPage: 100}
+	var shas []string
+	for {
+		commits, resp, err := c.client.PullRequests.ListCommits(ctx, owner, repo, number, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list PR commits: %w", err)
+		}
+		for _, cm := range commits {
+			shas = append(shas, cm.GetSHA())
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return shas, nil
+}
+
+// GetDiffFiles gets the changed files in a PR
+func (c *GitHubClient) GetDiffFiles(ctx context.Context, owner, repo string, number int) ([]string, error) {
+	opts := &github.ListOptions{PerPage: 100}
+	var files []string
+	for {
+		commitFiles, resp, err := c.client.PullRequests.ListFiles(ctx, owner, repo, number, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list PR files: %w", err)
+		}
+		for _, f := range commitFiles {
+			files = append(files, f.GetFilename())
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return files, nil
 }

@@ -1,48 +1,73 @@
-# Asika Configuration Example
+# Asika Configuration
+# See: https://github.com/minibp/asika for documentation
 
-# Server configuration
+# Server settings
 [server]
 listen = ":8080"
-mode   = "release"
+mode   = "release"   # "debug" | "release"
 
-# Mode: single | multi
+# Mode: "multi" for cross-platform sync, "single" for single repo
 mode = "multi"
 
-# Database
+# Database (bbolt)
 [database]
 path = "/var/lib/asika/asika.db"
 
 # Authentication
 [auth]
-jwt_secret = "your-secret-key-change-me"
-token_expiry = "72h"
+jwt_secret    = "change-me-in-production"
+token_expiry  = "72h"
 
-# Notifications (optional)
-[[notify]]
-type = "smtp"
-[notify.config]
-host     = "smtp.example.com"
-port     = 587
-username = "asika@example.com"
-password = "your-password"
-to       = ["admin@example.com"]
-
-# Events
+# Event source: "webhook" or "polling"
 [events]
-mode = "webhook"
-webhook_secret = "shared-secret"
+mode            = "webhook"
+webhook_secret  = "change-me-webhook-secret"
+polling_interval = "5m"   # only used when mode = "polling"
 
-# Git
+# Git work directory for temp bare repos
 [git]
 workdir = "/var/lib/asika/work"
 
-# Tokens
+# Platform tokens (or use env vars: ASIKA_GITHUB_TOKEN, etc.)
 [tokens]
-github = "ghp_xxxxxxxxxxxx"
-gitlab = "glpat-xxxxxxxxxxxx"
-gitea  = "xxxxxxxxxxxxxxxx"
+github = ""
+gitlab = ""
+gitea  = ""
 
-# Label rules (hot reload)
+# Merge queue defaults (overridable per repo group)
+[merge_queue]
+required_approvals = 1
+ci_check_required  = true
+core_contributors  = ["admin1", "admin2"]
+
+# Spam detection
+[spam]
+enabled                    = true
+time_window                = "10m"
+threshold                  = 3
+trigger_on_author          = true
+trigger_on_similar_title   = true
+title_similarity_threshold = 0.6
+trigger_on_title_kw        = ["spam", "fix typo", "readme update"]
+
+# Notification channels
+[[notify]]
+type   = "smtp"
+config = { host = "smtp.example.com", port = 587, username = "bot@example.com", password = "change-me", to = ["admin@example.com"] }
+
+# [[notify]]
+# type   = "wecom"
+# config = { webhook_url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY" }
+
+# [[notify]]
+# type   = "github_at"
+# config = { owner = "your-org", repo = "your-repo", to = ["admin1"] }
+
+# [[notify]]
+# type   = "gitlab_at"
+# config = { owner = "your-org", repo = "your-repo", to = ["admin1"] }
+
+# Label rules (hot-reloadable)
 [[label_rules]]
 pattern = "**/*.go"
 label   = "go"
@@ -51,41 +76,33 @@ label   = "go"
 pattern = "**/*.js"
 label   = "javascript"
 
-# Spam detection
-[spam]
-enabled = true
-time_window = "10m"
-threshold = 3
-trigger_on_author = true
-trigger_on_similar_title = true
-title_similarity_threshold = 0.8
-trigger_on_keywords = ["spam", "hack", "crypto"]
-
-# Merge queue defaults
-[merge_queue]
-required_approvals = 1
-core_contributors = ["admin", "lead-dev"]
-
-# Global hook path
-hookpath = ""
+[[label_rules]]
+pattern = "docs/**"
+label   = "documentation"
 
 # Repo groups (multi mode)
 [[repo_groups]]
-name = "main-project"
-github = "owner/repo"
-gitlab = "group/repo"
-gitea  = "owner/repo"
+name           = "my-project"
+mode           = "multi"         # overrides global mode per group
+github         = "my-org/my-repo"
+gitlab         = "my-org/my-repo"
+gitea          = "my-org/my-repo"
 default_branch = "main"
-hookpath = "/etc/asika/hooks/main-project"
-ci_provider = "github_actions"
+hookpath       = ""
+ci_provider    = "github_actions"  # "github_actions" | "gitlab_ci" | "gitea_actions" | "none"
+
 [repo_groups.merge_queue]
 required_approvals = 2
-core_contributors = ["lead-dev"]
+ci_check_required  = true
+core_contributors  = ["senior-dev1", "senior-dev2"]
 
-# Single repo config (single mode)
-[single_repo]
-platform = "github"
-repo     = "owner/repo"
-default_branch = "main"
+# Single repo mode (only used when global mode = "single")
+# [single_repo]
+# platform       = "github"      # mirror_platform in tasks.md, the active platform
+# repo           = "my-org/my-repo"
+# default_branch = "main"
+# hookpath       = ""
+# ci_provider    = "github_actions"
+
+# Custom hook path (global)
 hookpath = ""
-ci_provider = "github_actions"

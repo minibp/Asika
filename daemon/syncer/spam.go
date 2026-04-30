@@ -1,152 +1,238 @@
 package syncer
 
 import (
-    "context"
-    "encoding/json"
-    "log/slog"
-    "strings"
-    "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
 
-    "asika/common/db"
-    "asika/common/models"
+	"asika/common/config"
+	"asika/common/db"
+	"asika/common/events"
+	"asika/common/models"
+	"asika/common/platforms"
+	"asika/daemon/notifier"
 )
 
 // SpamDetector detects and handles spam PRs
 type SpamDetector struct {
-    cfg *models.Config
+	cfg     *models.Config
+	clients map[platforms.PlatformType]platforms.PlatformClient
 }
 
 // NewSpamDetector creates a new spam detector
 func NewSpamDetector(cfg *models.Config) *SpamDetector {
-    return &SpamDetector{
-        cfg: cfg,
-    }
+	// Clients are set later via SetClients
+	return &SpamDetector{
+		cfg: cfg,
+	}
 }
 
-// Scan scans for spam PRs
+// NewSpamDetectorWithClients creates a new spam detector with platform clients
+func NewSpamDetectorWithClients(cfg *models.Config, clients map[platforms.PlatformType]platforms.PlatformClient) *SpamDetector {
+	return &SpamDetector{
+		cfg:     cfg,
+		clients: clients,
+	}
+}
+
+// SetClients sets the platform clients
+func (d *SpamDetector) SetClients(clients map[platforms.PlatformType]platforms.PlatformClient) {
+	d.clients = clients
+}
+
+// Scan scans for spam PRs (called periodically)
 func (d *SpamDetector) Scan() {
-    if !d.cfg.Spam.Enabled {
-        return
-    }
+	if !d.cfg.Spam.Enabled {
+		return
+	}
 
-    ctx := context.Background()
-    window := parseDuration(d.cfg.Spam.TimeWindow, 10*time.Minute)
-    cutoff := time.Now().Add(-window)
+	window := parseDuration(d.cfg.Spam.TimeWindow, 10*time.Minute)
+	cutoff := time.Now().Add(-window)
+	prs := d.getPRsAfter(cutoff)
+	spamPRs := d.detectSpam(prs)
 
-    // Get PRs within time window
-    prs := d.getPRsAfter(cutoff)
+	for _, pr := range spamPRs {
+		d.HandleSpam(pr, pr.RepoGroup)
+		events.PublishPR(events.EventSpamDetected, pr.RepoGroup, pr.Platform, pr, nil)
+	}
 
-    // Check for spam
-    spamPRs := d.detectSpam(prs)
-
-    // Handle spam PRs
-    for _, pr := range spamPRs {
-        d.handleSpam(ctx, pr)
-    }
+	if len(spamPRs) > 0 {
+		slog.Warn("spam scan results", "total_prs", len(prs), "spam_detected", len(spamPRs))
+	}
 }
 
-// getPRsAfter gets PRs created after a certain time
+// getPRsAfter gets PRs created after a certain time from bbolt
 func (d *SpamDetector) getPRsAfter(after time.Time) []*models.PRRecord {
-    prs := make([]*models.PRRecord, 0)
-
-    db.ForEach(db.BucketPRs, func(key, value []byte) error {
-        var pr models.PRRecord
-        if err := json.Unmarshal(value, &pr); err != nil {
-            return err
-        }
-
-        if pr.CreatedAt.After(after) {
-            prs = append(prs, &pr)
-        }
-
-        return nil
-    })
-
-    return prs
+	prs := make([]*models.PRRecord, 0)
+	db.ForEach(db.BucketPRs, func(key, value []byte) error {
+		var pr models.PRRecord
+		if err := json.Unmarshal(value, &pr); err != nil {
+			return err
+		}
+		if pr.CreatedAt.After(after) && !pr.SpamFlag {
+			prs = append(prs, &pr)
+		}
+		return nil
+	})
+	return prs
 }
 
 // detectSpam detects spam based on configured rules
 func (d *SpamDetector) detectSpam(prs []*models.PRRecord) []*models.PRRecord {
-    spamMap := make(map[string]*models.PRRecord)
+	spamMap := make(map[string]*models.PRRecord)
 
-    // Check by author
-    if d.cfg.Spam.TriggerOnAuthor {
-        authorCount := make(map[string][]*models.PRRecord)
-        for _, pr := range prs {
-            authorCount[pr.Author] = append(authorCount[pr.Author], pr)
-        }
+	// Check by author: too many PRs by same author in time window
+	if d.cfg.Spam.TriggerOnAuthor {
+		authorCount := make(map[string][]*models.PRRecord)
+		for _, pr := range prs {
+			authorCount[pr.Author] = append(authorCount[pr.Author], pr)
+		}
+		for _, prList := range authorCount {
+			if len(prList) >= d.cfg.Spam.Threshold {
+				for _, pr := range prList {
+					spamMap[pr.ID] = pr
+				}
+			}
+		}
+	}
 
-        for _, prList := range authorCount {
-            if len(prList) >= d.cfg.Spam.Threshold {
-                for _, pr := range prList {
-                    spamMap[pr.ID] = pr
-                }
-            }
-        }
-    }
+	// Check by similar title
+	if d.cfg.Spam.TriggerOnSimilarTitle {
+		for i := 0; i < len(prs); i++ {
+			for j := i + 1; j < len(prs); j++ {
+				if d.isSimilarTitle(prs[i].Title, prs[j].Title) {
+					spamMap[prs[i].ID] = prs[i]
+					spamMap[prs[j].ID] = prs[j]
+				}
+			}
+		}
+	}
 
-    // Check by similar title
-    if d.cfg.Spam.TriggerOnSimilarTitle {
-        for i := 0; i < len(prs); i++ {
-            for j := i + 1; j < len(prs); j++ {
-                if d.isSimilarTitle(prs[i].Title, prs[j].Title) {
-                    spamMap[prs[i].ID] = prs[i]
-                    spamMap[prs[j].ID] = prs[j]
-                }
-            }
-        }
-    }
+	// Check by keywords in title
+	for _, pr := range prs {
+		for _, keyword := range d.cfg.Spam.TriggerOnKeywords {
+			if strings.Contains(strings.ToLower(pr.Title), strings.ToLower(keyword)) {
+				spamMap[pr.ID] = pr
+				break
+			}
+		}
+	}
 
-    // Check by keywords
-    keywords := d.cfg.Spam.TriggerOnKeywords
-    for _, pr := range prs {
-        for _, keyword := range keywords {
-            if strings.Contains(strings.ToLower(pr.Title), strings.ToLower(keyword)) {
-                spamMap[pr.ID] = pr
-                break
-            }
-        }
-    }
-
-    result := make([]*models.PRRecord, 0, len(spamMap))
-    for _, pr := range spamMap {
-        result = append(result, pr)
-    }
-
-    return result
+	result := make([]*models.PRRecord, 0, len(spamMap))
+	for _, pr := range spamMap {
+		result = append(result, pr)
+	}
+	return result
 }
 
-// isSimilarTitle checks if two titles are similar
+// isSimilarTitle checks if two titles are similar enough
 func (d *SpamDetector) isSimilarTitle(title1, title2 string) bool {
-    // Simple similarity check - can be improved
-    return strings.Contains(strings.ToLower(title1), strings.ToLower(title2)) ||
-        strings.Contains(strings.ToLower(title2), strings.ToLower(title1))
+	lower1 := strings.ToLower(title1)
+	lower2 := strings.ToLower(title2)
+
+	// Simple containment check
+	if strings.Contains(lower1, lower2) || strings.Contains(lower2, lower1) {
+		return true
+	}
+
+	// Character-level Jaccard similarity
+	set1 := make(map[rune]bool)
+	set2 := make(map[rune]bool)
+	for _, c := range lower1 {
+		set1[c] = true
+	}
+	for _, c := range lower2 {
+		set2[c] = true
+	}
+
+	intersection := 0
+	for c := range set1 {
+		if set2[c] {
+			intersection++
+		}
+	}
+	union := len(set1) + len(set2) - intersection
+	if union == 0 {
+		return false
+	}
+	return float64(intersection)/float64(union) >= d.cfg.Spam.TitleSimilarityThreshold
 }
 
-// handleSpam handles a spam PR
-func (d *SpamDetector) handleSpam(ctx context.Context, pr *models.PRRecord) {
-    // Mark as spam
-    pr.SpamFlag = true
-    pr.State = "spam"
-    pr.UpdatedAt = time.Now()
+// HandleSpam marks a PR as spam, closes it via platform API, and sends notifications
+func (d *SpamDetector) HandleSpam(pr *models.PRRecord, repoGroup string) {
+	ctx := context.Background()
 
-    data, _ := json.Marshal(pr)
-    db.Put(db.BucketPRs, pr.RepoGroup+"#"+pr.ID, data)
+	// Mark as spam in bbolt
+	pr.SpamFlag = true
+	pr.State = "spam"
+	pr.UpdatedAt = time.Now()
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	data, _ := json.Marshal(pr)
+	db.Put(db.BucketPRs, key, data)
 
-    // Close PR via platform API
-    // This would need platform client
+	// Close PR via platform API
+	if d.clients != nil {
+		client := d.clients[platforms.PlatformType(pr.Platform)]
+		if client != nil {
+			group := config.GetRepoGroupByName(d.cfg, repoGroup)
+			if group != nil {
+				owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+				if owner != "" && repo != "" {
+					if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+						slog.Error("failed to close spam PR", "error", err)
+					} else {
+						slog.Info("spam PR closed", "platform", pr.Platform, "pr_number", pr.PRNumber)
+					}
+					// Comment explaining spam detection
+					body := fmt.Sprintf("This PR has been marked as **spam** by Asika. Author: %s. If this is a mistake, contact an admin.", pr.Author)
+					if err := client.CommentPR(ctx, owner, repo, pr.PRNumber, body); err != nil {
+						slog.Warn("failed to comment on spam PR", "error", err)
+					}
+				}
+			}
+		}
+	}
 
-    // Send notifications
-    // This would use the notifier
-
-    slog.Warn("spam detected", "pr_id", pr.ID, "author", pr.Author, "title", pr.Title)
+	// Send notifications
+	d.sendSpamNotification(pr)
+	slog.Warn("spam handled", "pr_id", pr.ID, "author", pr.Author)
 }
 
-// parseDuration parses a duration string
+// sendSpamNotification sends notifications via all configured channels
+func (d *SpamDetector) sendSpamNotification(pr *models.PRRecord) {
+	for _, nc := range d.cfg.Notify {
+		var n notifier.Notifier
+		switch nc.Type {
+		case "smtp":
+			n = notifier.NewSMTPNotifier(nc.Config)
+		case "wecom":
+			n = notifier.NewWeComNotifier(nc.Config)
+		case "github_at":
+			n = notifier.NewGitHubAtNotifier(nc.Config)
+		case "gitlab_at":
+			n = notifier.NewGitLabAtNotifier(nc.Config)
+		default:
+			continue
+		}
+
+		title := fmt.Sprintf("[Spam Alert] PR #%d by %s", pr.PRNumber, pr.Author)
+		body := fmt.Sprintf("PR #%d \"%s\" by %s marked as spam.\nRepo: %s | Platform: %s", pr.PRNumber, pr.Title, pr.Author, pr.RepoGroup, pr.Platform)
+
+		ctx := context.Background()
+		if err := n.Send(ctx, title, body); err != nil {
+			slog.Error("notification failed", "type", nc.Type, "error", err)
+		}
+	}
+}
+
+// parseDuration parses a duration string with fallback
 func parseDuration(s string, defaultDur time.Duration) time.Duration {
-    d, err := time.ParseDuration(s)
-    if err != nil {
-        return defaultDur
-    }
-    return d
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return defaultDur
+	}
+	return d
 }
