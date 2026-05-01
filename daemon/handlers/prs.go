@@ -62,8 +62,8 @@ func ListPRs(c *gin.Context) {
 
 	prs, err := client.ListPRs(c.Request.Context(), owner, repo, state)
 	if err != nil {
-		slog.Error("failed to list PRs", "error", err)
-		c.JSON(http.StatusOK, records)
+		slog.Error("failed to list PRs from platform", "error", err, "platform", platform, "repo_group", repoGroup)
+		c.JSON(http.StatusOK, gin.H{"error": "platform API error: " + err.Error(), "data": records})
 		return
 	}
 

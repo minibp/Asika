@@ -34,10 +34,9 @@
     async function loadDashboard() {
         try {
             const resp = await apiRequest('/api/v1/repos/main/prs?state=open');
-            if (resp.ok) {
-                const prs = await resp.json();
-                document.getElementById('openPRs').textContent = prs.length;
-            }
+            const body = await resp.json();
+            const prs = Array.isArray(body) ? body : (body.data || []);
+            document.getElementById('openPRs').textContent = prs.length;
             const qResp = await apiRequest('/api/v1/queue/main');
             if (qResp.ok) {
                 const queue = await qResp.json();
