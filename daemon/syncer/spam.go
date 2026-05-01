@@ -13,7 +13,7 @@ import (
 	"asika/common/events"
 	"asika/common/models"
 	"asika/common/platforms"
-	"asika/daemon/notifier"
+	"asika/common/notifier"
 )
 
 // SpamDetector detects and handles spam PRs

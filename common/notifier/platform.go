@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"asika/common/platforms"
 )
@@ -73,15 +74,12 @@ func (n *PlatformNotifier) Type() string {
 
 // Send sends a notification via platform comment, @mentioning configured users
 func (n *PlatformNotifier) Send(ctx context.Context, title, body string) error {
-	if len(n.to) == 0 {
-		return fmt.Errorf("no users configured")
+	if n.client == nil {
+		return fmt.Errorf("platform notifier has no client")
 	}
 
-	if n.client == nil {
-		// Without a client, we can only log
-		slog.Warn("platform notifier has no client, logging instead", "platform", n.platform)
-		slog.Info("notification", "title", title, "body", body)
-		return nil
+	if len(n.to) == 0 {
+		return fmt.Errorf("no users configured")
 	}
 
 	// Build mention body
@@ -90,10 +88,29 @@ func (n *PlatformNotifier) Send(ctx context.Context, title, body string) error {
 		mentions += "@" + user + " "
 	}
 
-	commentBody := fmt.Sprintf("**%s**\n\n%s\n\n%s", title, body, mentions)
+	commentBody := fmt.Sprintf("**%s**\n\n%s\n\n%s", title, body, strings.TrimSpace(mentions))
 
-	// Comment on the latest open issue/PR or a specific one
-	// For now, we just log the comment since we need a specific PR number
-	slog.Info("platform notification prepared", "platform", n.platform, "comment", commentBody)
+	// Post comment on the repo's issue tracker or a general PR
+	// Try to find an open PR to comment on
+	prs, err := n.client.ListPRs(ctx, n.owner, n.repo, "open")
+	if err != nil {
+		slog.Warn("failed to list PRs for notification", "error", err)
+		// Fall back to just logging
+		slog.Info("platform notification", "platform", n.platform, "owner", n.owner, "repo", n.repo, "comment", commentBody)
+		return nil
+	}
+
+	if len(prs) > 0 {
+		// Comment on the first open PR
+		if err := n.client.CommentPR(ctx, n.owner, n.repo, prs[0].PRNumber, commentBody); err != nil {
+			slog.Error("failed to post platform notification comment", "error", err)
+			return err
+		}
+		slog.Info("platform notification comment posted", "platform", n.platform, "pr", prs[0].PRNumber)
+	} else {
+		// No open PRs, just log
+		slog.Info("platform notification (no open PRs)", "platform", n.platform, "comment", commentBody)
+	}
+
 	return nil
 }

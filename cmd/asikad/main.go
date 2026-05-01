@@ -58,10 +58,14 @@ func main() {
 		clients[platforms.PlatformGitHub] = platforms.NewGitHubClient(cfg.Tokens.GitHub, cfg.Events.WebhookSecret)
 	}
 	if cfg.Tokens.GitLab != "" {
-		clients[platforms.PlatformGitLab] = platforms.NewGitLabClient(cfg.Tokens.GitLab, "", cfg.Events.WebhookSecret)
+		clients[platforms.PlatformGitLab] = platforms.NewGitLabClient(cfg.Tokens.GitLab, cfg.GitLabBaseURL, cfg.Events.WebhookSecret)
 	}
 	if cfg.Tokens.Gitea != "" {
-		clients[platforms.PlatformGitea] = platforms.NewGiteaClient("https://gitea.example.com", cfg.Tokens.Gitea, cfg.Events.WebhookSecret)
+		giteaURL := cfg.GiteaBaseURL
+		if giteaURL == "" {
+			giteaURL = "https://gitea.example.com"
+		}
+		clients[platforms.PlatformGitea] = platforms.NewGiteaClient(giteaURL, cfg.Tokens.Gitea, cfg.Events.WebhookSecret)
 	}
 
     // Initialize event bus
@@ -78,6 +82,8 @@ func main() {
 	// Start merge queue manager and periodic checker
 	queueMgr := queue.NewManager(cfg, clients)
 	handlers.InitQueueMgr(queueMgr)
+	syncr := syncer.NewSyncer(cfg, clients)
+	handlers.InitSyncer(syncr)
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		for range ticker.C {

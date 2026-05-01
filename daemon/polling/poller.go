@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"asika/common/db"
@@ -85,18 +86,13 @@ func (p *Poller) pollRepoGroup(rg models.RepoGroupConfig) {
 func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platform, repo string) {
 	ctx := context.Background()
 
-	// Parse owner/repo
-	// TODO: handle different repo formats
+	// Parse owner/repo using the same logic as config.GetOwnerRepoFromGroup
+	idx := strings.LastIndex(repo, "/")
 	owner := ""
 	repoName := repo
-	if idx := len(repo) - 1; idx > 0 {
-		for i := idx; i >= 0; i-- {
-			if repo[i] == '/' {
-				owner = repo[:i]
-				repoName = repo[i+1:]
-				break
-			}
-		}
+	if idx >= 0 {
+		owner = repo[:idx]
+		repoName = repo[idx+1:]
 	}
 
 	prs, err := client.ListPRs(ctx, owner, repoName, "all")

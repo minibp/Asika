@@ -179,6 +179,7 @@ func (s *Syncer) SyncBranchDeletion(repoGroup, sourcePlatform, branch string) {
 func (s *Syncer) recordSync(pr *models.PRRecord, targetPlatform, status, errorMsg string) {
 	record := models.SyncRecord{
 		ID:             uuid.New().String(),
+		PRID:           pr.ID,
 		RepoGroup:      pr.RepoGroup,
 		SourcePlatform: pr.Platform,
 		TargetPlatform: targetPlatform,
@@ -217,10 +218,19 @@ func (s *Syncer) getRepoURL(platform, repo string) string {
 	case platforms.PlatformGitHub:
 		return fmt.Sprintf("https://github.com/%s/%s.git", parts[0], parts[1])
 	case platforms.PlatformGitLab:
-		return fmt.Sprintf("https://gitlab.com/%s/%s.git", parts[0], parts[1])
+		base := s.cfg.GitLabBaseURL
+		if base == "" {
+			base = "https://gitlab.com"
+		}
+		base = strings.TrimSuffix(base, "/")
+		return fmt.Sprintf("%s/%s/%s.git", base, parts[0], parts[1])
 	case platforms.PlatformGitea:
-		// TODO: configurable Gitea base URL
-		return fmt.Sprintf("https://gitea.example.com/%s/%s.git", parts[0], parts[1])
+		base := s.cfg.GiteaBaseURL
+		if base == "" {
+			base = "https://gitea.example.com"
+		}
+		base = strings.TrimSuffix(base, "/")
+		return fmt.Sprintf("%s/%s/%s.git", base, parts[0], parts[1])
 	}
 	return ""
 }

@@ -79,6 +79,7 @@ type AuditLog struct {
 // SyncRecord represents a sync history record
 type SyncRecord struct {
     ID             string    `json:"id"`
+    PRID           string    `json:"pr_id"`
     RepoGroup      string    `json:"repo_group"`
     SourcePlatform string    `json:"source_platform"`
     TargetPlatform string    `json:"target_platform"`
@@ -190,6 +191,8 @@ type Config struct {
 	Spam        SpamConfig        `toml:"spam" json:"spam"`
 	MergeQueue  MergeQueueConfig  `toml:"merge_queue" json:"merge_queue"`
 	HookPath    string            `toml:"hookpath" json:"hookpath"`
-	RepoGroups  []RepoGroupConfig `toml:"repo_groups" json:"repo_groups"`
-	SingleRepo  SingleRepoConfig  `toml:"single_repo" json:"single_repo"`
+	RepoGroups   []RepoGroupConfig `toml:"repo_groups" json:"repo_groups"`
+	SingleRepo   SingleRepoConfig  `toml:"single_repo" json:"single_repo"`
+	GitLabBaseURL string           `toml:"gitlab_base_url" json:"gitlab_base_url"`
+	GiteaBaseURL  string           `toml:"gitea_base_url" json:"gitea_base_url"`
 }

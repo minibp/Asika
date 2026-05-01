@@ -11,14 +11,23 @@ import (
 	"asika/common/db"
 	"asika/common/models"
 	"asika/common/platforms"
+	"asika/daemon/syncer"
 )
 
 // clients is a package-level variable to access platform clients
 var clients map[platforms.PlatformType]platforms.PlatformClient
 
+// syncerRef is set by InitSyncer from cmd/asikad/main.go
+var syncerRef *syncer.Syncer
+
 // InitClients initializes the platform clients for handlers
 func InitClients(c map[platforms.PlatformType]platforms.PlatformClient) {
 	clients = c
+}
+
+// InitSyncer initializes the syncer for handlers
+func InitSyncer(s *syncer.Syncer) {
+	syncerRef = s
 }
 
 // ListPRs handles GET /api/v1/repos/:repo_group/prs (8.2)

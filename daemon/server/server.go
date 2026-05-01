@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -18,9 +20,10 @@ import (
 
 // Server represents the HTTP server
 type Server struct {
-	engine *gin.Engine
-	cfg     *models.Config
-	clients map[platforms.PlatformType]platforms.PlatformClient
+	engine   *gin.Engine
+	httpSrv  *http.Server
+	cfg      *models.Config
+	clients  map[platforms.PlatformType]platforms.PlatformClient
 }
 
 // NewServer creates a new server instance
@@ -257,15 +260,28 @@ func (s *Server) setupRoutes() {
 
 // Start starts the server
 func (s *Server) Start() error {
+	var addr string
 	if s.cfg == nil {
-		slog.Info("starting server in initialization mode", "listen", ":8080")
-		return s.engine.Run(":8080")
+		addr = ":8080"
+	} else {
+		addr = s.cfg.Server.Listen
 	}
-	slog.Info("starting server", "listen", s.cfg.Server.Listen)
-	return s.engine.Run(s.cfg.Server.Listen)
+
+	s.httpSrv = &http.Server{
+		Addr:    addr,
+		Handler: s.engine,
+	}
+
+	slog.Info("starting server", "listen", addr)
+	return s.httpSrv.ListenAndServe()
 }
 
-// Stop stops the server
+// Stop stops the server gracefully
 func (s *Server) Stop() error {
-	return nil
+	if s.httpSrv == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return s.httpSrv.Shutdown(ctx)
 }

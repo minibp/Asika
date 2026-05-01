@@ -82,10 +82,18 @@ func (c *Consumer) handleEvent(event events.Event) {
 		c.handlePRMerged(event)
 	case events.EventPRApproved:
 		c.handlePRApproved(event)
+	case events.EventPRReopened:
+		c.handlePRReopened(event)
 	case events.EventSpamDetected:
 		c.handleSpamDetected(event)
 	case events.EventPRLabeled:
 		slog.Info("PR labeled", "repo_group", event.RepoGroup)
+	case events.EventBranchDeleted:
+		c.handleBranchDeleted(event)
+	case events.EventSyncCompleted:
+		slog.Info("sync completed", "repo_group", event.RepoGroup)
+	case events.EventSyncFailed:
+		slog.Error("sync failed", "repo_group", event.RepoGroup, "error", event.Payload)
 	}
 }
 
@@ -197,5 +205,49 @@ func (c *Consumer) handleSpamDetected(event events.Event) {
 				}
 			}
 		}
+	}
+}
+
+func (c *Consumer) handlePRReopened(event events.Event) {
+	pr := event.PR
+	if pr == nil {
+		return
+	}
+
+	slog.Info("PR reopened (spam recovery)", "title", pr.Title, "repo_group", pr.RepoGroup)
+
+	// Update state in bbolt - set to open, spam flag cleared
+	pr.State = "open"
+	pr.SpamFlag = false
+	pr.UpdatedAt = time.Now()
+	key := fmt.Sprintf("%s#%s#%d", event.RepoGroup, event.Platform, pr.PRNumber)
+	data, _ := json.Marshal(pr)
+	db.Put(db.BucketPRs, key, data)
+
+	// Spam reopen: bypass queue, use git cherry-pick to push to target branches
+	// This is per tasks.md 7.4: use common Git tools to cherry-pick PR commits
+	if c.syncer != nil {
+		ctx := context.Background()
+		// For spam reopen, we cherry-pick directly without going through merge queue
+		// The syncer.SyncOnMerge will handle the cherry-pick for single/multi mode
+		if err := c.syncer.SyncOnMerge(ctx, pr); err != nil {
+			slog.Error("failed to sync spam-reopened PR", "error", err, "pr_id", pr.ID)
+		}
+	}
+}
+
+func (c *Consumer) handleBranchDeleted(event events.Event) {
+	// Payload should contain branch name
+	branch, ok := event.Payload.(string)
+	if !ok || branch == "" {
+		slog.Warn("branch deleted event missing branch name")
+		return
+	}
+
+	slog.Info("branch deleted", "branch", branch, "repo_group", event.RepoGroup)
+
+	// Sync branch deletion to other platforms (multi mode only)
+	if c.syncer != nil {
+		c.syncer.SyncBranchDeletion(event.RepoGroup, event.Platform, branch)
 	}
 }
