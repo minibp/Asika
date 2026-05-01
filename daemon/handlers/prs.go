@@ -36,35 +36,36 @@ func ListPRs(c *gin.Context) {
 	state := c.Query("state")
 	platform := c.Query("platform")
 
+	records := make([]models.PRRecord, 0)
+
 	cfg := config.Current()
 	group := config.GetRepoGroupByName(cfg, repoGroup)
 	if group == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		c.JSON(http.StatusOK, records)
 		return
 	}
 
 	// Get platform client
 	client := getClientForGroup(group, platform)
 	if client == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform configured"})
+		c.JSON(http.StatusOK, records)
 		return
 	}
 
 	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
 	if owner == "" || repo == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo for platform"})
+		c.JSON(http.StatusOK, records)
 		return
 	}
 
 	prs, err := client.ListPRs(c.Request.Context(), owner, repo, state)
 	if err != nil {
 		slog.Error("failed to list PRs", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list PRs"})
+		c.JSON(http.StatusOK, records)
 		return
 	}
 
 	// Convert to PRRecord format
-	var records []models.PRRecord
 	for _, pr := range prs {
 		records = append(records, models.PRRecord{
 			PRNumber: pr.PRNumber,
