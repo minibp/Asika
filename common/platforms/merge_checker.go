@@ -65,7 +65,8 @@ func checkPlatformMergeMethod(ctx context.Context, client PlatformClient, platfo
 
 	hasMultiple, err := client.HasMultipleMergeMethods(ctx, parts[0], parts[1])
 	if err != nil {
-		return fmt.Errorf("failed to check merge methods for %s: %w", repo, err)
+		slog.Warn("cannot check merge methods, skipping", "platform", platform, "repo", repo, "error", err)
+		return nil
 	}
 
 	if hasMultiple {

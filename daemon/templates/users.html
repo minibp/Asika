@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "styles"}}
+    <title>Users - Asika</title>
+</head>
+<body>
+{{template "header" .}}
+<div class="container">
+<h1>Users</h1>
+
+<div class="card">
+    <h2 style="margin-bottom:15px">Add User</h2>
+    <div style="display:flex; gap:15px; align-items:flex-end;">
+        <div class="form-group" style="flex:1; margin:0;">
+            <label>Username</label>
+            <input type="text" id="newUsername" placeholder="username">
+        </div>
+        <div class="form-group" style="flex:1; margin:0;">
+            <label>Password</label>
+            <input type="password" id="newPassword" placeholder="password">
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label>Role</label>
+            <select id="newRole">
+                <option value="viewer">Viewer</option>
+                <option value="operator">Operator</option>
+                <option value="admin">Admin</option>
+            </select>
+        </div>
+        <button class="btn btn-primary" onclick="addUser()" style="height:38px; margin-top:21px;">Add</button>
+    </div>
+    <div id="addMsg" style="margin-top:10px;"></div>
+</div>
+
+<div class="card">
+    <h2>User List</h2>
+    <table style="margin-top:15px;">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="usersBody">
+            <tr><td colspan="4" style="text-align:center;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+</div>
+{{template "scripts"}}
+<script>
+    async function loadUsers() {
+        const tbody = document.getElementById('usersBody');
+        try {
+            const resp = await apiRequest('/api/v1/users');
+            if (!resp.ok) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">No users found</td></tr>'; return; }
+            const users = await resp.json();
+            if (users.length === 0) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">No users found</td></tr>'; return; }
+            tbody.innerHTML = users.map(u =>
+                '<tr><td>' + u.username + '</td>' +
+                '<td>' + u.role + '</td>' +
+                '<td>' + (u.created_at ? u.created_at.substring(0,10) : '-') + '</td>' +
+                '<td><button class="btn btn-danger" onclick="deleteUser(\'' + u.username + '\')" style="padding:4px 8px;font-size:12px;">Delete</button></td></tr>'
+            ).join('');
+        } catch(e) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">No users found</td></tr>'; }
+    }
+
+    async function addUser() {
+        const u = document.getElementById('newUsername').value.trim();
+        const p = document.getElementById('newPassword').value;
+        const r = document.getElementById('newRole').value;
+        const m = document.getElementById('addMsg');
+        if (!u || !p) { m.innerHTML = '<span class="error">Username and password required</span>'; return; }
+        try {
+            const resp = await apiRequest('/api/v1/users', {
+                method: 'POST',
+                body: JSON.stringify({username: u, password: p, role: r})
+            });
+            const d = await resp.json();
+            if (resp.ok) {
+                m.innerHTML = '<span class="success">User ' + u + ' created</span>';
+                document.getElementById('newUsername').value = '';
+                document.getElementById('newPassword').value = '';
+                loadUsers();
+            } else {
+                m.innerHTML = '<span class="error">' + (d.error || 'Failed') + '</span>';
+            }
+        } catch(e) { m.innerHTML = '<span class="error">Error: ' + e.message + '</span>'; }
+    }
+
+    async function deleteUser(username) {
+        if (!confirm('Delete user ' + username + '?')) return;
+        try {
+            await apiRequest('/api/v1/users/' + username, {method: 'DELETE'});
+            loadUsers();
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    loadUsers();
+</script>
+{{template "client_auth"}}
+</body>
+</html>

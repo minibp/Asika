@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"log/slog"
@@ -88,22 +90,64 @@ func GetPR(c *gin.Context) {
 	cfg := config.Current()
 	group := config.GetRepoGroupByName(cfg, repoGroup)
 	if group == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		c.JSON(http.StatusOK, gin.H{"error": "repo group not found"})
 		return
 	}
 
-	// Try to find PR in DB first
-	key := repoGroup + "#" + prID
-	data, err := db.Get(db.BucketPRs, key)
-	if err == nil {
+	// Try to find PR in DB by scanning for matching ID or PR number
+	var found *models.PRRecord
+	db.ForEach(db.BucketPRs, func(key, value []byte) error {
 		var pr models.PRRecord
-		if json.Unmarshal(data, &pr) == nil {
+		if json.Unmarshal(value, &pr) != nil {
+			return nil
+		}
+		if pr.RepoGroup == repoGroup && (pr.ID == prID || fmt.Sprintf("%d", pr.PRNumber) == prID) {
+			found = &pr
+		}
+		return nil
+	})
+
+	if found != nil {
+		c.JSON(http.StatusOK, found)
+		return
+	}
+
+	// Not in DB, try platform APIs
+	platforms := map[string]string{
+		"github": group.GitHub,
+		"gitlab": group.GitLab,
+		"gitea":  group.Gitea,
+	}
+
+	ctx := c.Request.Context()
+	for plat, repoPath := range platforms {
+		if repoPath == "" {
+			continue
+		}
+		client := getClientForGroup(group, plat)
+		if client == nil {
+			continue
+		}
+		owner, repo := config.GetOwnerRepoFromGroup(group, plat)
+
+		prNumber, convErr := strconv.Atoi(prID)
+		if convErr != nil {
+			continue
+		}
+
+		pr, err := client.GetPR(ctx, owner, repo, prNumber)
+		if err != nil {
+			continue
+		}
+		if pr != nil {
+			pr.RepoGroup = repoGroup
+			pr.Platform = plat
 			c.JSON(http.StatusOK, pr)
 			return
 		}
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+	c.JSON(http.StatusOK, gin.H{"error": "PR not found"})
 }
 
 // ApprovePR handles POST /api/v1/repos/:repo_group/prs/:pr_id/approve (8.2)

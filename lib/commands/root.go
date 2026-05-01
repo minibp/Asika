@@ -2,6 +2,9 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -77,4 +80,58 @@ func init() {
 	RootCmd.PersistentFlags().StringP("token", "t", "", "JWT token (or use ASIKA_TOKEN env)")
 	RootCmd.PersistentFlags().StringP("server", "s", "http://localhost:8080", "asikad server address")
 	RootCmd.PersistentFlags().StringP("output", "o", "table", "Output format: table, json, yaml")
+}
+
+// handleResponse reads the HTTP response and returns the parsed body as []interface{}
+// On error or empty data, prints a friendly message and returns nil
+func handleResponse(resp *http.Response, emptyMsg string) []interface{} {
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var data []interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		var obj map[string]interface{}
+		if err2 := json.Unmarshal(body, &obj); err2 == nil {
+			if msg, ok := obj["message"].(string); ok {
+				fmt.Println(msg)
+				return nil
+			}
+		}
+		fmt.Println(emptyMsg)
+		return nil
+	}
+
+	if len(data) == 0 {
+		fmt.Println(emptyMsg)
+		return nil
+	}
+
+	for _, item := range data {
+		b, _ := json.MarshalIndent(item, "", "  ")
+		fmt.Println(string(b))
+	}
+	return data
+}
+
+// handleWriteResponse handles responses for write commands (approve/close/etc)
+func handleWriteResponse(resp *http.Response, successMsg string) {
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var obj map[string]interface{}
+	if json.Unmarshal(body, &obj) != nil {
+		fmt.Println(successMsg)
+		return
+	}
+
+	if msg, ok := obj["message"].(string); ok {
+		fmt.Println(msg)
+		return
+	}
+	if err, ok := obj["error"].(string); ok && err != "" {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	fmt.Println(successMsg)
 }

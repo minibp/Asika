@@ -65,7 +65,9 @@ func main() {
 		if giteaURL == "" {
 			giteaURL = "https://gitea.example.com"
 		}
-		clients[platforms.PlatformGitea] = platforms.NewGiteaClient(giteaURL, cfg.Tokens.Gitea, cfg.Events.WebhookSecret)
+		if gc := platforms.NewGiteaClient(giteaURL, cfg.Tokens.Gitea, cfg.Events.WebhookSecret); gc != nil {
+			clients[platforms.PlatformGitea] = gc
+		}
 	}
 
     // Initialize event bus

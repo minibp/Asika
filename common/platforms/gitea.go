@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
@@ -24,8 +25,9 @@ type GiteaClient struct {
 // NewGiteaClient creates a new Gitea client
 func NewGiteaClient(baseURL, token string, webhookSecret string) *GiteaClient {
 	client, err := gitea.NewClient(baseURL, gitea.SetToken(token))
-	if err != nil {
-		client, _ = gitea.NewClient(baseURL, gitea.SetToken(token))
+	if err != nil || client == nil {
+		slog.Warn("failed to create gitea client, platform disabled", "baseURL", baseURL, "error", err)
+		return nil
 	}
 
 	return &GiteaClient{
@@ -334,6 +336,9 @@ func (c *GiteaClient) GetDefaultMergeMethod(ctx context.Context, owner, repo str
 
 // HasMultipleMergeMethods checks if multiple merge methods are available
 func (c *GiteaClient) HasMultipleMergeMethods(ctx context.Context, owner, repo string) (bool, error) {
+	if c.client == nil {
+		return false, fmt.Errorf("gitea client not initialized")
+	}
 	r, _, err := c.client.GetRepo(owner, repo)
 	if err != nil {
 		return false, fmt.Errorf("failed to get repo: %w", err)

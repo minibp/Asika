@@ -61,6 +61,11 @@ func SubmitWizardStep(c *gin.Context) {
 
 // CompleteWizard handles POST /api/v1/wizard/step/complete (10. WebUI Wizard)
 func CompleteWizard(c *gin.Context) {
+	if config.Current() != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "already initialized"})
+		return
+	}
+
 	slog.Info("wizard: completing setup")
 
 	var payload wizardPayload

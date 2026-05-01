@@ -245,6 +245,14 @@ func (s *Server) setupRoutes() {
 			})
 		})
 
+		ssr.GET("/users", func(c *gin.Context) {
+			user := c.GetString("username")
+			c.HTML(http.StatusOK, "users.html", gin.H{
+				"title":    "Users - Asika",
+				"username": user,
+			})
+		})
+
 		ssr.GET("/config", func(c *gin.Context) {
 			user := c.GetString("username")
 			c.HTML(http.StatusOK, "config.html", gin.H{
