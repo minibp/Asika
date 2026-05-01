@@ -44,8 +44,26 @@
                 document.getElementById('queueItems').textContent = queue.length;
             }
             document.getElementById('repoGroups').textContent = '1';
+
+            const logResp = await apiRequest('/api/v1/logs');
+            const act = document.getElementById('activity');
+            if (logResp.ok) {
+                const logs = await logResp.json();
+                if (logs.length === 0) {
+act.innerHTML = '<p style="color:#666">No recent activity</p>';
+                } else {
+                    act.innerHTML = logs.slice(0, 10).map(l =>
+                        '<div class="activity-item">' +
+                        '<span class="activity-time">' + l.timestamp + '</span> ' +
+                        '<span class="activity-msg">' + l.message + '</span>' +
+                        '</div>'
+                    ).join('');
+                }
+            } else {
+                act.innerHTML = '<p style="color:#666">No recent activity</p>';
+            }
         } catch (e) {
-            console.error(e);
+            document.getElementById('activity').innerHTML = '<p style="color:var(--text-secondary)">No recent activity</p>';
         }
     }
     loadDashboard();
