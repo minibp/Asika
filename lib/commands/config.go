@@ -26,7 +26,7 @@ var configShowCmd = &cobra.Command{
 		if resp == nil {
 			return
 		}
-		handleResponse(resp, "No configuration loaded")
+		handleObjectResponse(resp, "No configuration loaded")
 	},
 }
 

@@ -135,3 +135,23 @@ func handleWriteResponse(resp *http.Response, successMsg string) {
 
 	fmt.Println(successMsg)
 }
+
+// handleObjectResponse handles responses for single-object endpoints (config show, etc)
+func handleObjectResponse(resp *http.Response, emptyMsg string) {
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var obj map[string]interface{}
+	if json.Unmarshal(body, &obj) != nil {
+		fmt.Println(emptyMsg)
+		return
+	}
+
+	if err, ok := obj["error"].(string); ok && err != "" {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	b, _ := json.MarshalIndent(obj, "", "  ")
+	fmt.Println(string(b))
+}
