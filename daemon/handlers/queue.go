@@ -25,29 +25,28 @@ func InitQueueMgr(mgr *queue.Manager) {
 // GetQueue handles GET /api/v1/queue/:repo_group (8.3)
 func GetQueue(c *gin.Context) {
 	repoGroup := c.Param("repo_group")
+	items := make([]models.QueueItem, 0)
 
 	cfg := config.Current()
 	group := config.GetRepoGroupByName(cfg, repoGroup)
 	if group == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		c.JSON(http.StatusOK, items)
 		return
 	}
 
 	// Get queue items from DB
-	var items []models.QueueItem
 	err := db.ForEach(db.BucketQueueItems, func(key, value []byte) error {
 		var item models.QueueItem
 		if err := json.Unmarshal(value, &item); err != nil {
-			return nil // Skip invalid entries
+			return nil
 		}
-		// Filter by repo group
 		if strings.HasPrefix(string(key), repoGroup+"#") {
 			items = append(items, item)
 		}
 		return nil
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read queue"})
+		c.JSON(http.StatusOK, items)
 		return
 	}
 
@@ -61,7 +60,7 @@ func RecheckQueue(c *gin.Context) {
 	cfg := config.Current()
 	group := config.GetRepoGroupByName(cfg, repoGroup)
 	if group == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "repo group not found"})
+		c.JSON(http.StatusOK, gin.H{"message": "no repo group configured"})
 		return
 	}
 
@@ -70,7 +69,6 @@ func RecheckQueue(c *gin.Context) {
 		return
 	}
 
-	// Trigger queue recheck
 	go queueMgr.CheckQueue()
 	slog.Info("queue recheck triggered", "repo_group", repoGroup)
 

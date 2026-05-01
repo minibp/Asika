@@ -304,7 +304,7 @@ func MarkSpam(c *gin.Context) {
 func GetLogs(c *gin.Context) {
 	level := c.Query("level")
 
-	var logs []models.AuditLog
+	logs := make([]models.AuditLog, 0)
 	err := db.ForEach(db.BucketLogs, func(key, value []byte) error {
 		var log models.AuditLog
 		if err := json.Unmarshal(value, &log); err != nil {
@@ -317,7 +317,7 @@ func GetLogs(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read logs"})
+		c.JSON(http.StatusOK, logs)
 		return
 	}
 
