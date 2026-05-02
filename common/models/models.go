@@ -121,8 +121,16 @@ type NotifyConfig struct {
 
 // ServerConfig represents server configuration
 type ServerConfig struct {
-    Listen string `toml:"listen"`
-    Mode   string `toml:"mode"`
+    Listen          string `toml:"listen"`
+    Mode            string `toml:"mode"`
+    EnableWebUpdate bool   `toml:"enable_web_update"`
+}
+
+// UpdatesConfig represents self-update configuration
+type UpdatesConfig struct {
+    Check       bool   `toml:"check" json:"check"`
+    Interval    string `toml:"interval" json:"interval"`
+    NotifyOnNew bool   `toml:"notify_on_new" json:"notify_on_new"`
 }
 
 // DatabaseConfig represents database configuration
@@ -197,6 +205,7 @@ type Config struct {
 	GiteaBaseURL  string           `toml:"gitea_base_url" json:"gitea_base_url"`
 	Telegram      TelegramConfig   `toml:"telegram" json:"telegram"`
 	Feishu        FeishuConfig     `toml:"feishu" json:"feishu"`
+	Updates       UpdatesConfig    `toml:"updates" json:"updates"`
 }
 
 // TelegramConfig represents Telegram bot configuration

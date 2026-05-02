@@ -5,6 +5,7 @@
 [server]
 listen = ":8080"
 mode   = "release"   # "debug" | "release"
+enable_web_update = false   # allow admin to update from WebUI
 
 # Mode: "multi" for cross-platform sync, "single" for single repo
 mode = "multi"
@@ -106,3 +107,9 @@ core_contributors  = ["senior-dev1", "senior-dev2"]
 
 # Custom hook path (global)
 hookpath = ""
+
+# Self-update configuration
+[updates]
+check         = false    # periodically check for new versions
+interval      = "24h"    # check interval
+notify_on_new = false    # send notification through configured channels

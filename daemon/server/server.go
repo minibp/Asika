@@ -190,6 +190,14 @@ func (s *Server) setupRoutes() {
 		{
 			test.POST("/notify", handlers.TestNotify)
 		}
+
+		// Self-update (admin only)
+		update := protected.Group("/self-update")
+		update.Use(RequireRole("admin"))
+		{
+			update.GET("/check", handlers.CheckForUpdate)
+			update.GET("/run", handlers.PerformWebUpdate)
+		}
 	}
 
 	// WebUI routes - server-rendered (SSR) per tasks.md 2.3

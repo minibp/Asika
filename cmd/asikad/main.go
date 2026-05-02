@@ -16,6 +16,7 @@ import (
 	"asika/common/auth"
 	"asika/common/config"
 	"asika/common/db"
+	"asika/common/version"
 	"asika/common/events"
 	"asika/common/models"
 	"asika/common/notifier"
@@ -32,7 +33,13 @@ import (
 
 func main() {
     desktopMode := flag.Bool("desktop", false, "Run in desktop foreground mode (open browser to WebUI)")
+    versionFlag := flag.Bool("version", false, "Print version and exit")
     flag.Parse()
+
+    if *versionFlag {
+        fmt.Printf("Asika daemon version %s\n", version.Version)
+        return
+    }
 
     // Load config
     configPath := os.Getenv("ASIKA_CONFIG")

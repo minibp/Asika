@@ -50,6 +50,11 @@ func Load(path string) (*models.Config, error) {
 			RequiredApprovals: 1,
 			CICheckRequired:   true,
 		},
+		Updates: models.UpdatesConfig{
+			Check:       false,
+			Interval:    "24h",
+			NotifyOnNew: false,
+		},
 	}
 
     if err := toml.Unmarshal(data, cfg); err != nil {

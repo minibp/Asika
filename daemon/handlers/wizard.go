@@ -40,7 +40,9 @@ func GetWizardSteps(c *gin.Context) {
 		"database_config",
 		"platform_tokens",
 		"repository_group",
+		"notification_channels",
 		"admin_account",
+		"self_update",
 	}
 	c.JSON(http.StatusOK, gin.H{"steps": steps})
 }

@@ -66,8 +66,37 @@ var initCmd = &cobra.Command{
 			repoMode = "multi"
 		}
 
+		// Updates
+		fmt.Print("Enable automatic update check? (y/n) ['n']: ")
+		updateCheck, _ := reader.ReadString('\n')
+		updateCheck = strings.TrimSpace(updateCheck)
+		updateCheckEnabled := strings.ToLower(updateCheck) == "y" || strings.ToLower(updateCheck) == "yes"
+
+		updateInterval := "24h"
+		updateNotify := "n"
+		if updateCheckEnabled {
+			fmt.Print("Check interval ['24h']: ")
+			ui, _ := reader.ReadString('\n')
+			ui = strings.TrimSpace(ui)
+			if ui != "" {
+				updateInterval = ui
+			}
+			fmt.Print("Notify on new version? (y/n) ['n']: ")
+			updateNotify, _ = reader.ReadString('\n')
+			updateNotify = strings.TrimSpace(updateNotify)
+		}
+
+		updateCheckStr := "false"
+		if updateCheckEnabled {
+			updateCheckStr = "true"
+		}
+		updateNotifyStr := "false"
+		if strings.ToLower(updateNotify) == "y" || strings.ToLower(updateNotify) == "yes" {
+			updateNotifyStr = "true"
+		}
+
 		// Generate config
-		configTOML := generateConfigForInit(listen, mode, dbPath, jwtSecret, tokenExpiry, repoMode)
+		configTOML := generateConfigForInit(listen, mode, dbPath, jwtSecret, tokenExpiry, repoMode, updateCheckStr, updateInterval, updateNotifyStr)
 
 		// Send to server via HTTP
 		server := GetServer(cmd)
@@ -115,7 +144,7 @@ var initCmd = &cobra.Command{
 	},
 }
 
-func generateConfigForInit(listen, serverMode, dbPath, jwtSecret, tokenExpiry, repoMode string) string {
+func generateConfigForInit(listen, serverMode, dbPath, jwtSecret, tokenExpiry, repoMode, updateCheck, updateInterval, updateNotify string) string {
 	if jwtSecret == "" {
 		jwtSecret = "change-me-in-init"
 	}
@@ -148,10 +177,15 @@ enabled = true
 time_window = "10m"
 threshold = 3
 
+[updates]
+check         = %s
+interval      = "%s"
+notify_on_new = %s
+
 [[repo_groups]]
 name = "default"
 mode = "%s"
-`, listen, serverMode, dbPath, jwtSecret, tokenExpiry, repoMode)
+`, listen, serverMode, dbPath, jwtSecret, tokenExpiry, updateCheck, updateInterval, updateNotify, repoMode)
 }
 
 func init() {

@@ -18,9 +18,6 @@ var RootCmd = &cobra.Command{
 	Long:  `Asika is a PR management tool with multi-platform support.`,
 }
 
-// Version can be set via -ldflags
-var Version = "dev"
-
 type cliConfig struct {
 	Token  string `json:"token"`
 	Server string `json:"server"`

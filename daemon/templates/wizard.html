@@ -45,6 +45,7 @@
             <div class="step-dot" id="dot4">4</div>
             <div class="step-dot" id="dot5">5</div>
             <div class="step-dot" id="dot6">6</div>
+            <div class="step-dot" id="dot7">7</div>
         </div>
 
         <div id="errorMsg" class="error"></div>
@@ -206,9 +207,9 @@
             </div>
         </div>
 
-        <!-- Step 6: Admin Account -->
-        <div class="step-content" id="step6">
-            <h3>Step 6: Admin Account & Server</h3>
+        <!-- Step 8: Admin Account -->
+        <div class="step-content" id="step8">
+            <h3>Step 8: Admin Account & Server</h3>
             <div class="form-group">
                 <label>JWT Secret (leave empty to auto-generate):</label>
                 <input type="text" id="jwt_secret" placeholder="auto-generated if empty">
@@ -227,13 +228,48 @@
                 <input type="password" id="admin_pass" placeholder="set a strong password">
             </div>
             <div class="nav-buttons">
-                <button class="btn btn-secondary" onclick="prevStep(6)">Back</button>
+                <button class="btn btn-secondary" onclick="prevStep(8)">Back</button>
                 <button class="btn btn-success" onclick="submitWizard()">Complete Setup</button>
             </div>
         </div>
+        </div>
 
-        <!-- Step 7: Complete -->
+        <!-- Step 7: Self-Updates -->
         <div class="step-content" id="step7">
+            <h3>Step 7: Self-Update Settings</h3>
+            <p style="color: #666; font-size: 13px; margin-bottom: 15px;">Configure automatic version checking.</p>
+
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="updates_check" style="width:auto; display:inline; margin-right:8px;">
+                    Periodically check for new versions
+                </label>
+            </div>
+            <div class="form-group" id="updatesIntervalGroup" style="display:none;">
+                <label>Check interval:</label>
+                <select id="updates_interval">
+                    <option value="1h">Every hour</option>
+                    <option value="6h">Every 6 hours</option>
+                    <option value="12h">Every 12 hours</option>
+                    <option value="24h" selected>Every 24 hours</option>
+                    <option value="48h">Every 48 hours</option>
+                    <option value="168h">Weekly</option>
+                </select>
+            </div>
+            <div class="form-group" id="updatesNotifyGroup" style="display:none;">
+                <label>
+                    <input type="checkbox" id="updates_notify" style="width:auto; display:inline; margin-right:8px;">
+                    Send notification when new version is available
+                </label>
+            </div>
+            <div class="nav-buttons">
+                <button class="btn btn-secondary" onclick="prevStep(7)">Back</button>
+                <button class="btn btn-primary" onclick="nextStep(7)">Next</button>
+            </div>
+        </div>
+
+        <!-- Step 9: Complete -->
+        <div class="step-content" id="step9">
             <h3>Setup Complete!</h3>
             <div class="success">Configuration saved successfully!</div>
             <p style="margin-top: 15px;">You can now <a href="/login" style="color: #0066cc;">login</a> with your admin credentials.</p>
@@ -242,6 +278,12 @@
 
     <script>
         let currentStep = 1;
+
+        document.getElementById('updates_check').addEventListener('change', function() {
+            const checked = this.checked;
+            document.getElementById('updatesIntervalGroup').style.display = checked ? 'block' : 'none';
+            document.getElementById('updatesNotifyGroup').style.display = checked ? 'block' : 'none';
+        });
 
         function onModeChange() {
             const mode = document.getElementById('mode').value;
@@ -273,7 +315,7 @@
         }
 
         function updateDots(step) {
-            for (let i = 1; i <= 6; i++) {
+            for (let i = 1; i <= 7; i++) {
                 const dot = document.getElementById('dot' + i);
                 dot.classList.remove('active', 'done');
                 if (i < step) dot.classList.add('done');
@@ -406,7 +448,12 @@
                 }],
                 events: { mode: "webhook" },
                 merge_queue: { required_approvals: 1, ci_check_required: true },
-                spam: { enabled: false }
+                spam: { enabled: false },
+                updates: {
+                    check: document.getElementById('updates_check').checked,
+                    interval: document.getElementById('updates_interval').value,
+                    notify_on_new: document.getElementById('updates_notify').checked
+                }
             };
 
             try {
@@ -419,7 +466,7 @@
                 if (data.error) {
                     showError('Error: ' + data.error);
                 } else {
-                    goToStep(7);
+                    goToStep(9);
                 }
             } catch (e) {
                 showError('Failed to submit: ' + e.message);

@@ -12,6 +12,25 @@
 <h1>Configuration</h1>
 <div id="errorMsg" class="error" style="display:none;"></div>
 <div id="successMsg" class="success" style="display:none;"></div>
+
+<div class="card" style="margin-bottom:20px;">
+    <h2>System</h2>
+    <div style="margin-bottom:15px;">
+        <strong>Current version:</strong> <span id="currentVersion">-</span>
+        <span id="latestVersionInfo" style="margin-left:10px; display:none;">
+            (Latest: <span id="latestVersion">-</span>)
+        </span>
+    </div>
+    <button class="btn btn-primary" onclick="checkUpdate()" id="checkUpdateBtn">Check for Updates</button>
+    <button class="btn btn-success" onclick="performUpdate()" id="performUpdateBtn" style="display:none; margin-left:10px;">Update Now</button>
+    <div id="updateProgress" style="margin-top:10px; display:none;">
+        <div style="background:#e9ecef; border-radius:4px; height:20px; overflow:hidden;">
+            <div id="updateProgressBar" style="background:#28a745; height:100%; width:0%; transition:width 0.3s;"></div>
+        </div>
+        <span id="updateStatus" style="font-size:12px; color:#666;"></span>
+    </div>
+</div>
+
 <div class="card">
     <h2>Current Configuration</h2>
     <pre id="configDisplay" style="background: #f9f9f9; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 13px;">Loading...</pre>
@@ -28,6 +47,9 @@
 </div>
 {{template "scripts"}}
 <script>
+    loadConfig();
+    loadVersion();
+
     async function loadConfig() {
         try { const resp = await apiRequest('/api/v1/config'); if(resp.ok){ const c=await resp.json(); document.getElementById('configDisplay').textContent=JSON.stringify(c,null,2); } } catch(e){ showError('Failed: '+e.message); }
     }
@@ -35,9 +57,83 @@
         const v = document.getElementById('configInput').value; if(!v.trim()){ showError('Paste TOML first'); return; }
         try { const resp = await apiRequest('/api/v1/config',{method:'PUT',body:JSON.stringify({toml:v})}); const d=await resp.json(); if(resp.ok){ showSuccess('Updated!'); loadConfig(); } else { showError(d.error||'Failed'); } } catch(e){ showError('Error: '+e.message); }
     }
+    async function loadVersion() {
+        try {
+            const resp = await apiRequest('/api/v1/self-update/check');
+            const d = await resp.json();
+            document.getElementById('currentVersion').textContent = d.current || '-';
+            if (d.upgradable) {
+                document.getElementById('latestVersionInfo').style.display = 'inline';
+                document.getElementById('latestVersion').textContent = d.latest;
+                document.getElementById('performUpdateBtn').style.display = 'inline-block';
+            }
+        } catch(e) {}
+    }
+    async function checkUpdate() {
+        showSuccess('Checking for updates...');
+        await loadVersion();
+        const cur = document.getElementById('currentVersion').textContent;
+        const latest = document.getElementById('latestVersion').textContent;
+        if (cur === latest || latest === '-') {
+            showSuccess('You are running the latest version (' + cur + ')');
+        } else {
+            showSuccess('New version ' + latest + ' available!');
+        }
+    }
+    async function performUpdate() {
+        if (!confirm('This will download and install the latest version. The service will restart. Continue?')) return;
+        document.getElementById('updateProgress').style.display = 'block';
+        document.getElementById('performUpdateBtn').disabled = true;
+        document.getElementById('checkUpdateBtn').disabled = true;
+
+        const token = getToken();
+        try {
+            const resp = await fetch('/api/v1/self-update/run', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            if (!resp.ok) {
+                const d = await resp.json();
+                showError(d.error || 'Update failed');
+                return;
+            }
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                let event = '', data = '';
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) event = line.slice(7);
+                    else if (line.startsWith('data: ')) data = line.slice(6);
+                }
+                if (event && data) {
+                    try {
+                        const d = JSON.parse(data);
+                        if (event === 'progress') {
+                            document.getElementById('updateProgressBar').style.width = (d.progress || 0) + '%';
+                            document.getElementById('updateStatus').textContent = d.message || '';
+                        } else if (event === 'done') {
+                            document.getElementById('updateStatus').textContent = d.message || 'Done!';
+                        } else if (event === 'error') {
+                            showError(d.error || 'Update failed');
+                        }
+                    } catch(e) {}
+                }
+            }
+        } catch(e) {
+            showError('Update error: ' + e.message);
+        }
+    }
     function showError(m){ const e=document.getElementById('errorMsg'); e.textContent=m; e.style.display='block'; setTimeout(()=>e.style.display='none',5000); }
     function showSuccess(m){ const e=document.getElementById('successMsg'); e.textContent=m; e.style.display='block'; setTimeout(()=>e.style.display='none',5000); }
-    loadConfig();
+    function getToken() {
+        const token = localStorage.getItem('asika_token');
+        return token || '';
+    }
 </script>
 {{template "client_auth"}}
 </body>
