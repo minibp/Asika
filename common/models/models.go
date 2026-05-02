@@ -196,6 +196,7 @@ type Config struct {
 	GitLabBaseURL string           `toml:"gitlab_base_url" json:"gitlab_base_url"`
 	GiteaBaseURL  string           `toml:"gitea_base_url" json:"gitea_base_url"`
 	Telegram      TelegramConfig   `toml:"telegram" json:"telegram"`
+	Feishu        FeishuConfig     `toml:"feishu" json:"feishu"`
 }
 
 // TelegramConfig represents Telegram bot configuration
@@ -204,4 +205,15 @@ type TelegramConfig struct {
 	Token     string `toml:"token" json:"token"`
 	AdminIDs  []int64 `toml:"admin_ids" json:"admin_ids"`
 	ChatIDs   []string `toml:"chat_ids" json:"chat_ids"`
+}
+
+// FeishuConfig represents Feishu/Lark bot configuration
+type FeishuConfig struct {
+	Enabled      bool   `toml:"enabled" json:"enabled"`
+	AppID        string `toml:"app_id" json:"app_id"`
+	AppSecret    string `toml:"app_secret" json:"app_secret"`
+	WebhookURL   string `toml:"webhook_url" json:"webhook_url"`
+	VerificationToken string `toml:"verification_token" json:"verification_token"`
+	EncryptKey   string `toml:"encrypt_key" json:"encrypt_key"`
+	AdminIDs     []string `toml:"admin_ids" json:"admin_ids"`
 }

@@ -17,6 +17,7 @@ import (
 	"asika/common/notifier"
 	"asika/common/platforms"
 	"asika/daemon/consumer"
+	feishubot "asika/daemon/feishu"
 	"asika/daemon/handlers"
 	"asika/daemon/polling"
 	"asika/daemon/queue"
@@ -128,6 +129,9 @@ func main() {
     // Start Telegram bot (interactive decisions + notifications)
     startTelegramBot(cfg, clients, queueMgr, syncr, spamDetector)
 
+    // Start Feishu bot (interactive decisions + notifications)
+    startFeishuBot(cfg, clients, queueMgr, syncr, spamDetector)
+
 	// Create and start server
 	srv := server.NewServer(cfg, clients)
 
@@ -238,4 +242,39 @@ func toStringList(strings []string) []interface{} {
 		result[i] = s
 	}
 	return result
+}
+
+// startFeishuBot starts the Feishu interactive bot if configured.
+func startFeishuBot(
+	cfg *models.Config,
+	clients map[platforms.PlatformType]platforms.PlatformClient,
+	queueMgr *queue.Manager,
+	syncr *syncer.Syncer,
+	spamDetector *syncer.SpamDetector,
+) {
+	if cfg == nil || !cfg.Feishu.Enabled || cfg.Feishu.AppID == "" {
+		return
+	}
+
+	// Create feishu notifier
+	cfgMap := map[string]interface{}{
+		"webhook_url": cfg.Feishu.WebhookURL,
+		"app_id":      cfg.Feishu.AppID,
+		"app_secret":  cfg.Feishu.AppSecret,
+	}
+	feishuNotifier := notifier.NewFeishuNotifier(cfgMap)
+
+	fsBot := feishubot.NewBot(
+		cfg,
+		clients,
+		queueMgr,
+		syncr,
+		spamDetector,
+		feishuNotifier,
+	)
+
+	handlers.InitFeishuBot(fsBot)
+
+	go fsBot.Start()
+	slog.Info("feishu bot started", "app_id", cfg.Feishu.AppID)
 }

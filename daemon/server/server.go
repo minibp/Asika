@@ -63,7 +63,8 @@ func initCheckMiddleware() gin.HandlerFunc {
 
 		// Skip check for wizard, login, auth, and health paths
 		skip := false
-		skipPaths := []string{"/wizard", "/api/v1/wizard", "/api/v1/auth", "/login", "/health"}
+		// skipPaths that bypass init check (also add feishu callback)
+		skipPaths := []string{"/wizard", "/api/v1/wizard", "/api/v1/auth", "/login", "/health", "/api/v1/feishu"}
 		for _, p := range skipPaths {
 			if strings.HasPrefix(path, p) {
 				skip = true
@@ -264,6 +265,9 @@ func (s *Server) setupRoutes() {
 
 	// Webhook routes (no auth)
 	s.engine.POST("/webhook/:repo_group/:platform", handlers.WebhookHandler)
+
+	// Feishu event callback (no auth, validated by feishu's verification token)
+	s.engine.POST("/api/v1/feishu/event", handlers.FeishuEventHandler)
 }
 
 // Start starts the server
