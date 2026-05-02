@@ -1,4 +1,4 @@
-package feishu
+package platform
 
 import (
 	"encoding/json"
@@ -13,7 +13,7 @@ import (
 	"asika/testutil"
 )
 
-func setupFeishuTest(t *testing.T) (*Bot, func()) {
+func setupFeishuTest(t *testing.T) (*FeishuBot, func()) {
 	t.Helper()
 
 	tdb := testutil.NewTestDB(t)
@@ -41,7 +41,7 @@ func setupFeishuTest(t *testing.T) (*Bot, func()) {
 	syncr := syncer.NewSyncer(cfg, clients)
 	sd := syncer.NewSpamDetectorWithClients(cfg, clients)
 
-	b := NewBot(cfg, clients, qm, syncr, sd, nil)
+	b := NewFeishuBot(cfg, clients, qm, syncr, sd, nil)
 
 	cleanup := func() {
 		db.Close()

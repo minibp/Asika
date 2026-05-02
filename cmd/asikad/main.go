@@ -17,13 +17,12 @@ import (
 	"asika/common/notifier"
 	"asika/common/platforms"
 	"asika/daemon/consumer"
-	feishubot "asika/daemon/feishu"
 	"asika/daemon/handlers"
+	"asika/daemon/platform"
 	"asika/daemon/polling"
 	"asika/daemon/queue"
 	"asika/daemon/server"
 	"asika/daemon/syncer"
-	tgbot "asika/daemon/telegram"
 )
 
 func main() {
@@ -221,7 +220,7 @@ func startTelegramBot(
 		telegramNotifier = notifier.NewTelegramNotifier(cfgMap)
 	}
 
-	tgBot := tgbot.NewBot(
+	tgBot := platform.NewTelegramBot(
 		bot,
 		cfg,
 		clients,
@@ -264,7 +263,7 @@ func startFeishuBot(
 	}
 	feishuNotifier := notifier.NewFeishuNotifier(cfgMap)
 
-	fsBot := feishubot.NewBot(
+	fsBot := platform.NewFeishuBot(
 		cfg,
 		clients,
 		queueMgr,

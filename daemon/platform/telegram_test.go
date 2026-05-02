@@ -1,4 +1,4 @@
-package telegram
+package platform
 
 import (
 	"encoding/json"
@@ -13,7 +13,7 @@ import (
 	"asika/testutil"
 )
 
-func setupBotTest(t *testing.T) (*Bot, func()) {
+func setupBotTest(t *testing.T) (*TelegramBot, func()) {
 	t.Helper()
 
 	tdb := testutil.NewTestDB(t)
@@ -40,7 +40,7 @@ func setupBotTest(t *testing.T) (*Bot, func()) {
 	syncr := syncer.NewSyncer(cfg, clients)
 	sd := syncer.NewSpamDetectorWithClients(cfg, clients)
 
-	bot := &Bot{
+	bot := &TelegramBot{
 		bot:          nil, // no real bot for tests
 		cfg:          cfg,
 		clients:      clients,
@@ -101,7 +101,7 @@ func TestIsAdmin_EmptyAdminIDs(t *testing.T) {
 }
 
 // isAdminByID is a helper added for testing (duplicates internal logic)
-func (b *Bot) isAdminByID(id int64) bool {
+func (b *TelegramBot) isAdminByID(id int64) bool {
 	if len(b.adminIDs) == 0 {
 		return true
 	}
@@ -317,7 +317,7 @@ func TestSpamReopenViaBotLogic(t *testing.T) {
 }
 
 func TestEmptyBotSetup(t *testing.T) {
-	bot := &Bot{
+	bot := &TelegramBot{
 		adminIDs: map[int64]bool{},
 		stop:     make(chan struct{}),
 	}

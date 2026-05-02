@@ -1,4 +1,4 @@
-package feishu
+package platform
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 )
 
 // Bot wraps the Feishu/Lark bot with Asika management functionality.
-type Bot struct {
+type FeishuBot struct {
 	cfg          *models.Config
 	clients      map[platforms.PlatformType]platforms.PlatformClient
 	queueMgr     *queue.Manager
@@ -32,15 +32,15 @@ type Bot struct {
 }
 
 // NewBot creates a new Feishu bot.
-func NewBot(
+func NewFeishuBot(
 	cfg *models.Config,
 	clients map[platforms.PlatformType]platforms.PlatformClient,
 	queueMgr *queue.Manager,
 	syncerRef *syncer.Syncer,
 	spamDetector *syncer.SpamDetector,
 	n *notifier.FeishuNotifier,
-) *Bot {
-	b := &Bot{
+) *FeishuBot {
+	b := &FeishuBot{
 		cfg:          cfg,
 		clients:      clients,
 		queueMgr:     queueMgr,
@@ -58,19 +58,19 @@ func NewBot(
 }
 
 // Start starts the bot (sets up HTTP handlers if needed via external routing).
-func (b *Bot) Start() {
+func (b *FeishuBot) Start() {
 	slog.Info("starting feishu interactive bot")
 }
 
 // Stop stops the bot gracefully.
-func (b *Bot) Stop() {
+func (b *FeishuBot) Stop() {
 	close(b.stop)
 	slog.Info("feishu bot stopped")
 }
 
 // HandleEvent handles an incoming Feishu event (called from HTTP handler).
 // Returns a response body or nil if no response needed.
-func (b *Bot) HandleEvent(ctx context.Context, body []byte) (interface{}, error) {
+func (b *FeishuBot) HandleEvent(ctx context.Context, body []byte) (interface{}, error) {
 	var event struct {
 		Schema string          `json:"schema"`
 		Header struct {
@@ -98,7 +98,7 @@ func (b *Bot) HandleEvent(ctx context.Context, body []byte) (interface{}, error)
 }
 
 // handleURLVerification handles the URL verification challenge.
-func (b *Bot) handleURLVerification(raw json.RawMessage) (interface{}, error) {
+func (b *FeishuBot) handleURLVerification(raw json.RawMessage) (interface{}, error) {
 	var challenge struct {
 		Challenge string `json:"challenge"`
 		Token     string `json:"token"`
@@ -114,7 +114,7 @@ func (b *Bot) handleURLVerification(raw json.RawMessage) (interface{}, error) {
 }
 
 // handleMessageEvent handles incoming messages (commands).
-func (b *Bot) handleMessageEvent(ctx context.Context, raw json.RawMessage) (interface{}, error) {
+func (b *FeishuBot) handleMessageEvent(ctx context.Context, raw json.RawMessage) (interface{}, error) {
 	var msg struct {
 		Sender struct {
 			SenderID struct {
@@ -163,7 +163,7 @@ func (b *Bot) handleMessageEvent(ctx context.Context, raw json.RawMessage) (inte
 
 // parseMessageText extracts text content from Feishu message JSON.
 // Feishu wraps message content in a JSON string like {"text":"hello"}.
-func (b *Bot) parseMessageText(contentStr string) string {
+func (b *FeishuBot) parseMessageText(contentStr string) string {
 	if contentStr == "" {
 		return ""
 	}
@@ -179,7 +179,7 @@ func (b *Bot) parseMessageText(contentStr string) string {
 }
 
 // processCommand processes a text command and returns a reply string.
-func (b *Bot) processCommand(senderID, text string) string {
+func (b *FeishuBot) processCommand(senderID, text string) string {
 	if !b.isAdmin(senderID) {
 		return "Access denied. Admin only."
 	}
@@ -256,7 +256,7 @@ func (b *Bot) processCommand(senderID, text string) string {
 	}
 }
 
-func (b *Bot) helpText() string {
+func (b *FeishuBot) helpText() string {
 	return `Asika Feishu Bot Commands:
   help          - Show this help
   prs [group]   - List PRs
@@ -270,7 +270,7 @@ func (b *Bot) helpText() string {
   config        - Show config summary`
 }
 
-func (b *Bot) listPRsText(repoGroup string) string {
+func (b *FeishuBot) listPRsText(repoGroup string) string {
 	if repoGroup == "" {
 		groups := config.GetRepoGroups(b.cfg)
 		if len(groups) == 0 {
@@ -313,7 +313,7 @@ func (b *Bot) listPRsText(repoGroup string) string {
 	return sb.String()
 }
 
-func (b *Bot) showPRText(repoGroup, prID string) string {
+func (b *FeishuBot) showPRText(repoGroup, prID string) string {
 	pr, _ := getPRRecord(repoGroup, prID)
 	if pr == nil {
 		return fmt.Sprintf("PR %s not found in %s", prID, repoGroup)
@@ -325,7 +325,7 @@ func (b *Bot) showPRText(repoGroup, prID string) string {
 	)
 }
 
-func (b *Bot) doApprove(senderID, repoGroup, prID string) string {
+func (b *FeishuBot) doApprove(senderID, repoGroup, prID string) string {
 	pr, _ := getPRRecord(repoGroup, prID)
 	if pr == nil {
 		return "PR not found."
@@ -345,7 +345,7 @@ func (b *Bot) doApprove(senderID, repoGroup, prID string) string {
 	return fmt.Sprintf("PR #%d approved.", pr.PRNumber)
 }
 
-func (b *Bot) doClose(senderID, repoGroup, prID string) string {
+func (b *FeishuBot) doClose(senderID, repoGroup, prID string) string {
 	pr, _ := getPRRecord(repoGroup, prID)
 	if pr == nil {
 		return "PR not found."
@@ -365,7 +365,7 @@ func (b *Bot) doClose(senderID, repoGroup, prID string) string {
 	return fmt.Sprintf("PR #%d closed.", pr.PRNumber)
 }
 
-func (b *Bot) doReopen(senderID, repoGroup, prID string) string {
+func (b *FeishuBot) doReopen(senderID, repoGroup, prID string) string {
 	pr, _ := getPRRecord(repoGroup, prID)
 	if pr == nil {
 		return "PR not found."
@@ -385,7 +385,7 @@ func (b *Bot) doReopen(senderID, repoGroup, prID string) string {
 	return fmt.Sprintf("PR #%d reopened.", pr.PRNumber)
 }
 
-func (b *Bot) doMarkSpam(senderID, repoGroup, prID string) string {
+func (b *FeishuBot) doMarkSpam(senderID, repoGroup, prID string) string {
 	pr, _ := getPRRecord(repoGroup, prID)
 	if pr == nil {
 		return "PR not found."
@@ -415,7 +415,7 @@ func (b *Bot) doMarkSpam(senderID, repoGroup, prID string) string {
 	return fmt.Sprintf("PR #%d marked as spam.", pr.PRNumber)
 }
 
-func (b *Bot) showQueueText(repoGroup string) string {
+func (b *FeishuBot) showQueueText(repoGroup string) string {
 	if repoGroup == "" {
 		groups := config.GetRepoGroups(b.cfg)
 		if len(groups) > 0 {
@@ -447,7 +447,7 @@ func (b *Bot) showQueueText(repoGroup string) string {
 	return sb.String()
 }
 
-func (b *Bot) showConfigText() string {
+func (b *FeishuBot) showConfigText() string {
 	cfg := config.Current()
 	if cfg == nil {
 		return "Config not loaded."
@@ -460,14 +460,14 @@ func (b *Bot) showConfigText() string {
 	)
 }
 
-func (b *Bot) isAdmin(userID string) bool {
+func (b *FeishuBot) isAdmin(userID string) bool {
 	if len(b.adminIDs) == 0 {
 		return true
 	}
 	return b.adminIDs[userID]
 }
 
-func (b *Bot) getClient(platform string) platforms.PlatformClient {
+func (b *FeishuBot) getClient(platform string) platforms.PlatformClient {
 	if b.clients == nil {
 		return nil
 	}

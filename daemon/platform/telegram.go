@@ -1,4 +1,4 @@
-package telegram
+package platform
 
 import (
 	"context"
@@ -21,7 +21,7 @@ import (
 )
 
 // Bot wraps the Telegram bot with Asika management functionality.
-type Bot struct {
+type TelegramBot struct {
 	bot          *telebot.Bot
 	cfg          *models.Config
 	clients      map[platforms.PlatformType]platforms.PlatformClient
@@ -35,7 +35,7 @@ type Bot struct {
 
 // NewBot creates a new Telegram bot with interactive decision support.
 // If telegramNotifier is nil, creates a standalone bot for interactive use only.
-func NewBot(
+func NewTelegramBot(
 	bot *telebot.Bot,
 	cfg *models.Config,
 	clients map[platforms.PlatformType]platforms.PlatformClient,
@@ -44,8 +44,8 @@ func NewBot(
 	spamDetector *syncer.SpamDetector,
 	telegramNotifier *notifier.TelegramNotifier,
 	adminIDs []int64,
-) *Bot {
-	b := &Bot{
+) *TelegramBot {
+	b := &TelegramBot{
 		bot:          bot,
 		cfg:          cfg,
 		clients:      clients,
@@ -63,7 +63,7 @@ func NewBot(
 }
 
 // Start starts the bot polling and registers command handlers.
-func (b *Bot) Start() {
+func (b *TelegramBot) Start() {
 	if b.bot == nil {
 		slog.Warn("telegram bot: no bot instance, skipping start")
 		return
@@ -79,7 +79,7 @@ func (b *Bot) Start() {
 }
 
 // Stop stops the bot gracefully.
-func (b *Bot) Stop() {
+func (b *TelegramBot) Stop() {
 	close(b.stop)
 	if b.bot != nil {
 		b.bot.Stop()
@@ -88,7 +88,7 @@ func (b *Bot) Stop() {
 }
 
 // registerCommands registers all bot command handlers.
-func (b *Bot) registerCommands() {
+func (b *TelegramBot) registerCommands() {
 	b.bot.Handle("/start", b.handleStart)
 	b.bot.Handle("/help", b.handleHelp)
 	b.bot.Handle("/prs", b.handleListPRs)
@@ -109,14 +109,14 @@ func (b *Bot) registerCommands() {
 }
 
 // isAdmin checks if the sender is an authorized admin.
-func (b *Bot) isAdmin(c telebot.Context) bool {
+func (b *TelegramBot) isAdmin(c telebot.Context) bool {
 	if len(b.adminIDs) == 0 {
 		return true
 	}
 	return b.adminIDs[c.Sender().ID]
 }
 
-func (b *Bot) requireAdmin(c telebot.Context) bool {
+func (b *TelegramBot) requireAdmin(c telebot.Context) bool {
 	if !b.isAdmin(c) {
 		c.Send("Access denied. This bot is for authorized admins only.")
 		return false
@@ -125,7 +125,7 @@ func (b *Bot) requireAdmin(c telebot.Context) bool {
 }
 
 // handleStart handles /start command.
-func (b *Bot) handleStart(c telebot.Context) error {
+func (b *TelegramBot) handleStart(c telebot.Context) error {
 	userID := c.Sender().ID
 	username := c.Sender().Username
 
@@ -144,7 +144,7 @@ func (b *Bot) handleStart(c telebot.Context) error {
 }
 
 // handleHelp handles /help command.
-func (b *Bot) handleHelp(c telebot.Context) error {
+func (b *TelegramBot) handleHelp(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -170,7 +170,7 @@ func (b *Bot) handleHelp(c telebot.Context) error {
 }
 
 // handleListPRs handles /prs command.
-func (b *Bot) handleListPRs(c telebot.Context) error {
+func (b *TelegramBot) handleListPRs(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -225,7 +225,7 @@ func (b *Bot) handleListPRs(c telebot.Context) error {
 }
 
 // handleShowPR handles /pr command.
-func (b *Bot) handleShowPR(c telebot.Context) error {
+func (b *TelegramBot) handleShowPR(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -289,7 +289,7 @@ func (b *Bot) handleShowPR(c telebot.Context) error {
 }
 
 // handleApprovePR handles /approve command.
-func (b *Bot) handleApprovePR(c telebot.Context) error {
+func (b *TelegramBot) handleApprovePR(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -332,7 +332,7 @@ func (b *Bot) handleApprovePR(c telebot.Context) error {
 }
 
 // handleClosePR handles /close command.
-func (b *Bot) handleClosePR(c telebot.Context) error {
+func (b *TelegramBot) handleClosePR(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -371,7 +371,7 @@ func (b *Bot) handleClosePR(c telebot.Context) error {
 }
 
 // handleReopenPR handles /reopen command.
-func (b *Bot) handleReopenPR(c telebot.Context) error {
+func (b *TelegramBot) handleReopenPR(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -419,7 +419,7 @@ func (b *Bot) handleReopenPR(c telebot.Context) error {
 }
 
 // handleMarkSpam handles /spam command.
-func (b *Bot) handleMarkSpam(c telebot.Context) error {
+func (b *TelegramBot) handleMarkSpam(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -468,7 +468,7 @@ func (b *Bot) handleMarkSpam(c telebot.Context) error {
 }
 
 // handleShowQueue handles /queue command.
-func (b *Bot) handleShowQueue(c telebot.Context) error {
+func (b *TelegramBot) handleShowQueue(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -520,7 +520,7 @@ func (b *Bot) handleShowQueue(c telebot.Context) error {
 }
 
 // handleRecheckQueue handles /recheck command.
-func (b *Bot) handleRecheckQueue(c telebot.Context) error {
+func (b *TelegramBot) handleRecheckQueue(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -534,7 +534,7 @@ func (b *Bot) handleRecheckQueue(c telebot.Context) error {
 }
 
 // handleShowConfig handles /config command.
-func (b *Bot) handleShowConfig(c telebot.Context) error {
+func (b *TelegramBot) handleShowConfig(c telebot.Context) error {
 	if !b.requireAdmin(c) {
 		return nil
 	}
@@ -562,7 +562,7 @@ func (b *Bot) handleShowConfig(c telebot.Context) error {
 }
 
 // handleCallback handles inline button callbacks.
-func (b *Bot) handleCallback(c telebot.Context) error {
+func (b *TelegramBot) handleCallback(c telebot.Context) error {
 	if !b.isAdmin(c) {
 		return c.Respond(&telebot.CallbackResponse{Text: "Access denied."})
 	}
@@ -646,7 +646,7 @@ func (b *Bot) handleCallback(c telebot.Context) error {
 }
 
 // handleText handles non-command text messages.
-func (b *Bot) handleText(c telebot.Context) error {
+func (b *TelegramBot) handleText(c telebot.Context) error {
 	text := strings.TrimSpace(c.Text())
 	lower := strings.ToLower(text)
 
@@ -667,7 +667,7 @@ func (b *Bot) handleText(c telebot.Context) error {
 }
 
 // getClientForPlatform returns the platform client.
-func (b *Bot) getClientForPlatform(platform string) platforms.PlatformClient {
+func (b *TelegramBot) getClientForPlatform(platform string) platforms.PlatformClient {
 	if b.clients == nil {
 		return nil
 	}
