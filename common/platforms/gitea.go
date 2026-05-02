@@ -383,6 +383,10 @@ func (c *GiteaClient) VerifyWebhookSignature(body []byte, signature string) bool
 		return false
 	}
 
+	if strings.HasPrefix(signature, "sha256=") {
+		signature = strings.TrimPrefix(signature, "sha256=")
+	}
+
 	mac := hmac.New(sha256.New, []byte(c.webhookSecret))
 	mac.Write(body)
 	expectedMAC := hex.EncodeToString(mac.Sum(nil))

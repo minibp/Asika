@@ -2,6 +2,9 @@ package platforms
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -397,13 +400,29 @@ func (c *GitLabClient) GetApprovals(ctx context.Context, owner, repo string, num
 	return approvers, nil
 }
 
-// VerifyWebhookSignature verifies the webhook signature
-// GitLab uses X-GitLab-Token header, should match the configured webhook_secret
+// VerifyWebhookSignature verifies the webhook signature using HMAC-SHA256
+// GitLab uses X-Hub-Signature-256 header for system/service integration hooks,
+// and X-GitLab-Token for basic integration hooks.
 func (c *GitLabClient) VerifyWebhookSignature(body []byte, signature string) bool {
 	if c.webhookSecret == "" {
 		return false
 	}
-	return signature == c.webhookSecret
+
+	// Try token-based verification first (X-GitLab-Token)
+	if signature == c.webhookSecret {
+		return true
+	}
+
+	// Try HMAC-SHA256 verification (X-Hub-Signature-256)
+	if strings.HasPrefix(signature, "sha256=") {
+		signature = strings.TrimPrefix(signature, "sha256=")
+	}
+
+	mac := hmac.New(sha256.New, []byte(c.webhookSecret))
+	mac.Write(body)
+	expectedMAC := hex.EncodeToString(mac.Sum(nil))
+
+	return hmac.Equal([]byte(signature), []byte(expectedMAC))
 }
 
 // GetPRCommits gets the commits in a MR

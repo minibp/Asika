@@ -99,23 +99,6 @@ func (d *SpamDetector) detectSpam(prs []*models.PRRecord) []*models.PRRecord {
 		}
 	}
 
-	// Check by author (if enabled in config)
-	if d.cfg.Spam.TriggerOnAuthor {
-		authorCount := make(map[string]int)
-		for _, pr := range prs {
-			authorCount[pr.Author]++
-		}
-		for author, count := range authorCount {
-			if count >= d.cfg.Spam.Threshold {
-				for _, pr := range prs {
-					if pr.Author == author {
-						spamMap[pr.ID] = pr
-					}
-				}
-			}
-		}
-	}
-
 	// Check by keywords in title
 	for _, pr := range prs {
 		for _, keyword := range d.cfg.Spam.TriggerOnTitleKw {
