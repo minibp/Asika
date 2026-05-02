@@ -36,7 +36,7 @@ func RetrySync(c *gin.Context) {
 	syncID := c.Param("sync_id")
 
 	data, err := db.Get(db.BucketSyncHistory, syncID)
-	if err != nil {
+	if err != nil || data == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "sync record not found"})
 		return
 	}

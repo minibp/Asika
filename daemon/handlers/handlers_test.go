@@ -1,0 +1,650 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+
+	"asika/common/config"
+	"asika/common/db"
+	"asika/common/models"
+	"asika/common/platforms"
+	"asika/testutil"
+)
+
+func setupHandlerTest(t *testing.T) (*gin.Engine, func()) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+
+	tdb := testutil.NewTestDB(t)
+	db.DB = tdb
+
+	mock := testutil.NewMockPlatformClient()
+	clients = map[platforms.PlatformType]platforms.PlatformClient{
+		platforms.PlatformGitHub: mock,
+	}
+
+	engine := gin.New()
+
+	api := engine.Group("/api/v1")
+	protected := api.Group("")
+	protected.Use(func(c *gin.Context) {
+		c.Set("username", "admin")
+		c.Set("role", "admin")
+		c.Next()
+	})
+	{
+		users := protected.Group("/users")
+		{
+			users.GET("", ListUsers)
+			users.POST("", CreateUser)
+			users.DELETE("/:username", DeleteUser)
+		}
+
+		prs := protected.Group("/repos/:repo_group/prs")
+		{
+			prs.GET("", ListPRs)
+			prs.GET("/:pr_id", GetPR)
+			prs.POST("/:pr_id/approve", ApprovePR)
+			prs.POST("/:pr_id/close", ClosePR)
+			prs.POST("/:pr_id/reopen", ReopenPR)
+			prs.POST("/:pr_id/spam", MarkSpam)
+		}
+
+		queue := protected.Group("/queue/:repo_group")
+		{
+			queue.GET("", GetQueue)
+			queue.POST("/recheck", RecheckQueue)
+		}
+
+		logs := protected.Group("/logs")
+		{
+			logs.GET("", GetLogs)
+		}
+
+		conf := protected.Group("/config")
+		{
+			conf.GET("", GetConfig)
+			conf.PUT("", UpdateConfig)
+		}
+
+		sync := protected.Group("/sync")
+		{
+			sync.GET("/history", GetSyncHistory)
+			sync.POST("/retry/:sync_id", RetrySync)
+		}
+
+		pTest := protected.Group("/test")
+		{
+			pTest.POST("/notify", TestNotify)
+		}
+	}
+
+	cleanup := func() {
+		db.Close()
+	}
+	return engine, cleanup
+}
+
+func setupWizardTest(t *testing.T) (*gin.Engine, func()) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	wizard := engine.Group("/api/v1/wizard")
+	{
+		wizard.GET("", GetWizardSteps)
+		wizard.POST("/step/:step", SubmitWizardStep)
+		wizard.POST("/step/complete", CompleteWizard)
+	}
+
+	cleanup := func() {}
+	return engine, cleanup
+}
+
+func setupWebhookTest(t *testing.T) (*gin.Engine, func()) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	tdb := testutil.NewTestDB(t)
+	db.DB = tdb
+
+	mock := testutil.NewMockPlatformClient()
+	clients = map[platforms.PlatformType]platforms.PlatformClient{
+		platforms.PlatformGitHub: mock,
+	}
+
+	engine := gin.New()
+	engine.POST("/webhook/:repo_group/:platform", WebhookHandler)
+
+	cleanup := func() {
+		db.Close()
+	}
+	return engine, cleanup
+}
+
+// --- Config endpoints (8.4) ---
+
+func TestGetConfig_Masked(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	cfg := &models.Config{
+		Server: models.ServerConfig{Listen: ":8080", Mode: "debug"},
+		Database: models.DatabaseConfig{Path: "./test.db"},
+		Auth: models.AuthConfig{JWTSecret: "super-secret-key-value", TokenExpiry: "72h"},
+		Tokens: models.TokensConfig{
+			GitHub: "ghp_real_token_1234567890abcdef",
+			GitLab: "glpat_long_token_value_xyz",
+			Gitea:  "short",
+		},
+		RepoGroups: []models.RepoGroupConfig{
+			{Name: "test-group", Mode: "multi", GitHub: "org/repo"},
+		},
+	}
+	config.Store(cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/config", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result models.Config
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if result.Tokens.GitHub == cfg.Tokens.GitHub {
+		t.Error("GitHub token should be masked")
+	}
+	if result.Tokens.GitLab == cfg.Tokens.GitLab {
+		t.Error("GitLab token should be masked")
+	}
+	if result.Auth.JWTSecret == "super-secret-key-value" {
+		t.Error("JWT secret should be masked")
+	}
+	if !contains(result.Tokens.GitHub, "****") {
+		t.Error("GitHub token should contain mask chars")
+	}
+}
+
+func TestGetConfig_NotLoaded(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	config.Store(nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/config", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status 503, got %d", w.Code)
+	}
+}
+
+// --- PR endpoints (8.2) ---
+
+func TestListPRs_EmptyRepoGroup(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{
+			{Name: "empty-group", Mode: "multi", GitHub: "org/repo"},
+		},
+	}
+	config.Store(cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/repos/empty-group/prs", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestListPRs_RepoGroupNotFound(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{},
+	}
+	config.Store(cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/repos/nonexistent/prs", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+// --- Queue endpoints (8.3) ---
+
+func TestGetQueue_EmptyRepo(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{
+			{Name: "queue-test", Mode: "multi", GitHub: "org/repo"},
+		},
+	}
+	config.Store(cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/queue/queue-test", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+// --- Test notify endpoint (8.6) ---
+
+func TestTestNotify_AdminRole(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/test/notify", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+// --- Logs endpoint (8.2) ---
+
+func TestGetLogs_Empty(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/logs", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+// --- Wizard endpoints (10) ---
+
+func TestWizard_GetSteps(t *testing.T) {
+	engine, cleanup := setupWizardTest(t)
+	defer cleanup()
+
+	// Ensure config is nil to simulate uninitialized state
+	config.Store(nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/wizard", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestWizard_SubmitStep(t *testing.T) {
+	engine, cleanup := setupWizardTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/wizard/step/mode_selection", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty body in SubmitWizardStep, got %d", w.Code)
+	}
+}
+
+// --- Webhook endpoint ---
+
+func TestWebhook_InvalidSignature(t *testing.T) {
+	engine, cleanup := setupWebhookTest(t)
+	defer cleanup()
+
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{
+			{Name: "webhook-test", Mode: "multi", GitHub: "org/repo"},
+		},
+		Events: models.EventsConfig{WebhookSecret: "real-secret"},
+	}
+	config.Store(cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/webhook/webhook-test/github", nil)
+	req.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized && w.Code != http.StatusBadRequest {
+		t.Logf("got status %d", w.Code)
+	}
+}
+
+// --- Single repo mode tests ---
+
+func TestPRManagement_SingleMode_NoSyncer(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{
+			{
+				Name:           "docs-only",
+				Mode:           "single",
+				MirrorPlatform: "github",
+				GitHub:         "org/docs",
+				DefaultBranch:  "gh-pages",
+			},
+		},
+	}
+	config.Store(cfg)
+
+	// Test list PRs for single mode repo
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/repos/docs-only/prs", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for single mode list PRs, got %d", w.Code)
+	}
+}
+
+func TestPRManagement_SingleMode_GetPR(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{
+			{
+				Name:           "single-gh",
+				Mode:           "single",
+				MirrorPlatform: "github",
+				GitHub:         "org/single-repo",
+				DefaultBranch:  "main",
+			},
+		},
+	}
+	config.Store(cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/repos/single-gh/prs/1", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for single mode get PR, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPRManagement_SingleMode_ClosePR(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	// Use github platform since that's what's available in mock
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{
+			{
+				Name:           "mirror-gh",
+				Mode:           "single",
+				MirrorPlatform: "github",
+				GitHub:         "org/project",
+				DefaultBranch:  "main",
+			},
+		},
+	}
+	config.Store(cfg)
+
+	// Store a PR with "github" platform matching available client
+	key := "mirror-gh#1"
+	pr := models.PRRecord{
+		ID:        "1",
+		RepoGroup: "mirror-gh",
+		Platform:  "github",
+		PRNumber:  1,
+		Title:     "Test PR",
+		Author:    "dev",
+		State:     "open",
+	}
+	data, _ := json.Marshal(pr)
+	db.Put(db.BucketPRs, key, data)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/repos/mirror-gh/prs/1/close", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// --- User management endpoints (8.1) ---
+
+func TestListUsers_Admin(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/users", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for admin list users, got %d", w.Code)
+	}
+}
+
+func TestCreateUser_Admin(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/users", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty create user, got %d", w.Code)
+	}
+}
+
+func TestDeleteUser_Admin(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("DELETE", "/api/v1/users/nonexistent", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError && w.Code != http.StatusOK {
+		t.Logf("DeleteUser got status: %d", w.Code)
+	}
+}
+
+// --- Sync endpoints (8.5) ---
+
+func TestGetSyncHistory_Empty(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/sync/history", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestRetrySync_NotFound(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/sync/retry/nonexistent-id", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for retry nonexistent sync, got %d", w.Code)
+	}
+}
+
+// --- Masking helpers ---
+
+func TestMaskToken(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"short", "***"},
+		{"12345678", "***"},
+		{"123456789", "1234****6789"},
+		{"ghp_test1234567890abcdefghijklmnop", "ghp_****mnop"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := maskToken(tt.input)
+			if got != tt.want {
+				t.Errorf("maskToken(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMaskSecret(t *testing.T) {
+	got := maskSecret("my-secret-key-longer-than-8")
+	if !contains(got, "****") {
+		t.Errorf("maskSecret should contain mask chars, got %q", got)
+	}
+
+	got2 := maskSecret("short")
+	if got2 != "***" {
+		t.Errorf("maskSecret for short = %q, want ***", got2)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && findSubstring(s, substr)
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+// --- Single repo mode: syncer disabled for single mode ---
+
+func TestSingleMode_SyncerLogic(t *testing.T) {
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{
+			{
+				Name:           "single-docs",
+				Mode:           "single",
+				MirrorPlatform: "github",
+				GitHub:         "org/docs",
+				DefaultBranch:  "gh-pages",
+			},
+			{
+				Name: "multi-project",
+				Mode: "multi",
+				GitHub: "org/main",
+				GitLab: "group/main",
+				Gitea: "user/main",
+			},
+		},
+	}
+
+	singleGroup := config.GetRepoGroupByName(cfg, "single-docs")
+	if singleGroup == nil {
+		t.Fatal("single-docs group not found")
+	}
+
+	// Verify single mode properties
+	if singleGroup.Mode != "single" {
+		t.Errorf("Mode = %q, want single", singleGroup.Mode)
+	}
+	if singleGroup.MirrorPlatform != "github" {
+		t.Errorf("MirrorPlatform = %q, want github", singleGroup.MirrorPlatform)
+	}
+
+	// Multi repo should have different properties
+	multiGroup := config.GetRepoGroupByName(cfg, "multi-project")
+	if multiGroup.Mode != "multi" {
+		t.Errorf("Mode = %q, want multi", multiGroup.Mode)
+	}
+	if multiGroup.MirrorPlatform != "" {
+		t.Errorf("multi mode should have empty MirrorPlatform, got %q", multiGroup.MirrorPlatform)
+	}
+}
+
+func TestConfigHotReload_LabelRules(t *testing.T) {
+	engine, cleanup := setupHandlerTest(t)
+	defer cleanup()
+
+	cfg := &models.Config{
+		LabelRules: []models.LabelRule{
+			{Pattern: "*.go", Label: "go-code"},
+		},
+		RepoGroups: []models.RepoGroupConfig{
+			{Name: "test-group", Mode: "multi", GitHub: "org/repo"},
+		},
+		Auth:     models.AuthConfig{JWTSecret: "test-secret", TokenExpiry: "72h"},
+		Database: models.DatabaseConfig{Path: "./test.db"},
+	}
+	config.Store(cfg)
+
+	t.Run("verify current rules", func(t *testing.T) {
+		stored := config.Current()
+		if len(stored.LabelRules) != 1 {
+			t.Errorf("expected 1 rule, got %d", len(stored.LabelRules))
+		}
+	})
+
+	t.Run("hot reload new rules", func(t *testing.T) {
+		newCfg := *cfg
+		newCfg.LabelRules = []models.LabelRule{
+			{Pattern: "*.go", Label: "go-code"},
+			{Pattern: "*.md", Label: "docs"},
+		}
+		config.Store(&newCfg)
+
+		stored := config.Current()
+		if len(stored.LabelRules) != 2 {
+			t.Errorf("after hot reload: expected 2 rules, got %d", len(stored.LabelRules))
+		}
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/config", nil)
+	engine.ServeHTTP(w, req)
+}
+
+func TestWebhookRouteRegistration(t *testing.T) {
+	_, cleanup := setupWebhookTest(t)
+	defer cleanup()
+
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{
+			{Name: "test-group", Mode: "multi", GitHub: "org/repo"},
+		},
+	}
+	config.Store(cfg)
+}

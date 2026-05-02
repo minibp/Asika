@@ -165,7 +165,7 @@ func ApprovePR(c *gin.Context) {
 	// Get platform from PR record in DB
 	key := repoGroup + "#" + prID
 	data, err := db.Get(db.BucketPRs, key)
-	if err != nil {
+	if err != nil || data == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
 		return
 	}
@@ -211,7 +211,7 @@ func ClosePR(c *gin.Context) {
 
 	key := repoGroup + "#" + prID
 	data, err := db.Get(db.BucketPRs, key)
-	if err != nil {
+	if err != nil || data == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
 		return
 	}
@@ -257,7 +257,7 @@ func ReopenPR(c *gin.Context) {
 
 	key := repoGroup + "#" + prID
 	data, err := db.Get(db.BucketPRs, key)
-	if err != nil {
+	if err != nil || data == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
 		return
 	}
@@ -303,7 +303,7 @@ func MarkSpam(c *gin.Context) {
 
 	key := repoGroup + "#" + prID
 	data, err := db.Get(db.BucketPRs, key)
-	if err != nil {
+	if err != nil || data == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
 		return
 	}

@@ -11,7 +11,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-github/v69 v69.0.0
 	github.com/google/uuid v1.6.0
-	github.com/spf13/cobra v1.9.0
+	github.com/spf13/cobra v1.10.2
 	github.com/wneessen/go-mail v0.7.2
 	gitlab.com/gitlab-org/api/client-go v1.46.0
 	go.etcd.io/bbolt v1.4.3
@@ -59,7 +59,7 @@ require (
 	github.com/quic-go/quic-go v0.59.0 // indirect
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
-	github.com/spf13/pflag v1.0.6 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
