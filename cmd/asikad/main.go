@@ -7,10 +7,14 @@ import (
 	"syscall"
 	"time"
 
+	"gopkg.in/telebot.v3"
+
 	"asika/common/auth"
 	"asika/common/config"
 	"asika/common/db"
 	"asika/common/events"
+	"asika/common/models"
+	"asika/common/notifier"
 	"asika/common/platforms"
 	"asika/daemon/consumer"
 	"asika/daemon/handlers"
@@ -18,6 +22,7 @@ import (
 	"asika/daemon/queue"
 	"asika/daemon/server"
 	"asika/daemon/syncer"
+	tgbot "asika/daemon/telegram"
 )
 
 func main() {
@@ -120,6 +125,9 @@ func main() {
     go eventConsumer.Start()
     slog.Info("event consumer started")
 
+    // Start Telegram bot (interactive decisions + notifications)
+    startTelegramBot(cfg, clients, queueMgr, syncr, spamDetector)
+
 	// Create and start server
 	srv := server.NewServer(cfg, clients)
 
@@ -157,4 +165,77 @@ func parseDurationDefault(s string, defaultDur time.Duration) time.Duration {
         return defaultDur
     }
     return d
+}
+
+// startTelegramBot starts the Telegram interactive bot if configured.
+func startTelegramBot(
+	cfg *models.Config,
+	clients map[platforms.PlatformType]platforms.PlatformClient,
+	queueMgr *queue.Manager,
+	syncr *syncer.Syncer,
+	spamDetector *syncer.SpamDetector,
+) {
+	if cfg == nil || !cfg.Telegram.Enabled || cfg.Telegram.Token == "" {
+		return
+	}
+
+	pref := telebot.Settings{
+		Token:  cfg.Telegram.Token,
+		Poller: &telebot.LongPoller{Timeout: 10},
+	}
+
+	bot, err := telebot.NewBot(pref)
+	if err != nil {
+		slog.Error("failed to create telegram bot", "error", err)
+		return
+	}
+
+	// Find or create the TelegramNotifier for notification sending
+	var telegramNotifier *notifier.TelegramNotifier
+	for _, nc := range cfg.Notify {
+		if nc.Type == "telegram" {
+			cfgMap := map[string]interface{}{
+				"token": cfg.Telegram.Token,
+				"to":    toStringList(cfg.Telegram.ChatIDs),
+			}
+			telegramNotifier = notifier.NewTelegramNotifier(cfgMap)
+			if telegramNotifier != nil && telegramNotifier.Bot() == nil {
+				// Inject our bot instance
+				// We need to create it with the bot we already have
+				_ = telegramNotifier
+			}
+			break
+		}
+	}
+
+	// If no notifier configured, create one anyway for the interactive bot
+	if telegramNotifier == nil {
+		cfgMap := map[string]interface{}{
+			"token": cfg.Telegram.Token,
+			"to":    toStringList(cfg.Telegram.ChatIDs),
+		}
+		telegramNotifier = notifier.NewTelegramNotifier(cfgMap)
+	}
+
+	tgBot := tgbot.NewBot(
+		bot,
+		cfg,
+		clients,
+		queueMgr,
+		syncr,
+		spamDetector,
+		telegramNotifier,
+		cfg.Telegram.AdminIDs,
+	)
+
+	go tgBot.Start()
+	slog.Info("telegram bot started", "admin_ids", len(cfg.Telegram.AdminIDs))
+}
+
+func toStringList(strings []string) []interface{} {
+	result := make([]interface{}, len(strings))
+	for i, s := range strings {
+		result[i] = s
+	}
+	return result
 }

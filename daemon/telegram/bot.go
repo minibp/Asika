@@ -1,0 +1,707 @@
+package telegram
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strconv"
+	"strings"
+	"time"
+
+	"gopkg.in/telebot.v3"
+
+	"asika/common/config"
+	"asika/common/db"
+	"asika/common/models"
+	"asika/common/notifier"
+	"asika/common/platforms"
+	"asika/daemon/queue"
+	"asika/daemon/syncer"
+)
+
+// Bot wraps the Telegram bot with Asika management functionality.
+type Bot struct {
+	bot          *telebot.Bot
+	cfg          *models.Config
+	clients      map[platforms.PlatformType]platforms.PlatformClient
+	queueMgr     *queue.Manager
+	syncerRef    *syncer.Syncer
+	spamDetector *syncer.SpamDetector
+	notifier     *notifier.TelegramNotifier
+	adminIDs     map[int64]bool
+	stop         chan struct{}
+}
+
+// NewBot creates a new Telegram bot with interactive decision support.
+// If telegramNotifier is nil, creates a standalone bot for interactive use only.
+func NewBot(
+	bot *telebot.Bot,
+	cfg *models.Config,
+	clients map[platforms.PlatformType]platforms.PlatformClient,
+	queueMgr *queue.Manager,
+	syncerRef *syncer.Syncer,
+	spamDetector *syncer.SpamDetector,
+	telegramNotifier *notifier.TelegramNotifier,
+	adminIDs []int64,
+) *Bot {
+	b := &Bot{
+		bot:          bot,
+		cfg:          cfg,
+		clients:      clients,
+		queueMgr:     queueMgr,
+		syncerRef:    syncerRef,
+		spamDetector: spamDetector,
+		notifier:     telegramNotifier,
+		adminIDs:     make(map[int64]bool),
+		stop:         make(chan struct{}),
+	}
+	for _, id := range adminIDs {
+		b.adminIDs[id] = true
+	}
+	return b
+}
+
+// Start starts the bot polling and registers command handlers.
+func (b *Bot) Start() {
+	if b.bot == nil {
+		slog.Warn("telegram bot: no bot instance, skipping start")
+		return
+	}
+
+	slog.Info("starting telegram interactive bot")
+
+	b.registerCommands()
+
+	go func() {
+		b.bot.Start()
+	}()
+}
+
+// Stop stops the bot gracefully.
+func (b *Bot) Stop() {
+	close(b.stop)
+	if b.bot != nil {
+		b.bot.Stop()
+	}
+	slog.Info("telegram bot stopped")
+}
+
+// registerCommands registers all bot command handlers.
+func (b *Bot) registerCommands() {
+	b.bot.Handle("/start", b.handleStart)
+	b.bot.Handle("/help", b.handleHelp)
+	b.bot.Handle("/prs", b.handleListPRs)
+	b.bot.Handle("/pr", b.handleShowPR)
+	b.bot.Handle("/approve", b.handleApprovePR)
+	b.bot.Handle("/close", b.handleClosePR)
+	b.bot.Handle("/reopen", b.handleReopenPR)
+	b.bot.Handle("/spam", b.handleMarkSpam)
+	b.bot.Handle("/queue", b.handleShowQueue)
+	b.bot.Handle("/recheck", b.handleRecheckQueue)
+	b.bot.Handle("/config", b.handleShowConfig)
+
+	// Handle button callbacks for inline decisions
+	b.bot.Handle(telebot.OnCallback, b.handleCallback)
+
+	// Handle text messages for natural language-ish commands
+	b.bot.Handle(telebot.OnText, b.handleText)
+}
+
+// isAdmin checks if the sender is an authorized admin.
+func (b *Bot) isAdmin(c telebot.Context) bool {
+	if len(b.adminIDs) == 0 {
+		return true
+	}
+	return b.adminIDs[c.Sender().ID]
+}
+
+func (b *Bot) requireAdmin(c telebot.Context) bool {
+	if !b.isAdmin(c) {
+		c.Send("Access denied. This bot is for authorized admins only.")
+		return false
+	}
+	return true
+}
+
+// handleStart handles /start command.
+func (b *Bot) handleStart(c telebot.Context) error {
+	userID := c.Sender().ID
+	username := c.Sender().Username
+
+	msg := fmt.Sprintf(
+		"*Welcome to Asika Bot* \n\nHello @%s (ID: %d)\n\nUse /help to see available commands.\n",
+		username, userID,
+	)
+
+	if b.isAdmin(c) {
+		msg += "You have admin privileges."
+	} else {
+		msg += "Access is currently unrestricted. Configure `admin_ids` in bot config to restrict access."
+	}
+
+	return c.Send(msg, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+}
+
+// handleHelp handles /help command.
+func (b *Bot) handleHelp(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	help := `*Asika Bot Commands*
+
+📋 *PR Management*
+/prs [repo_group] — List PRs
+/pr <repo_group> <number> — Show PR details
+/approve <repo_group> <pr_id> — Approve a PR
+/close <repo_group> <pr_id> — Close a PR
+/reopen <repo_group> <pr_id> — Reopen a PR (spam recovery)
+/spam <repo_group> <pr_id> — Mark PR as spam
+
+📊 *Queue*
+/queue [repo_group] — Show merge queue
+/recheck <repo_group> — Trigger queue recheck
+
+⚙️ *Config*
+/config — Show current config (masked)`
+
+	return c.Send(help, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+}
+
+// handleListPRs handles /prs command.
+func (b *Bot) handleListPRs(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	args := strings.Fields(c.Text())
+	repoGroup := ""
+	if len(args) > 1 {
+		repoGroup = args[1]
+	} else {
+		groups := config.GetRepoGroups(b.cfg)
+		if len(groups) == 0 {
+			return c.Send("No repo groups configured.")
+		}
+		repoGroup = groups[0].Name
+	}
+
+	// Fetch PRs from DB
+	var prs []models.PRRecord
+	db.ForEach(db.BucketPRs, func(key, value []byte) error {
+		var pr models.PRRecord
+		if err := json.Unmarshal(value, &pr); err != nil {
+			return nil
+		}
+		if pr.RepoGroup == repoGroup || repoGroup == "" {
+			prs = append(prs, pr)
+		}
+		return nil
+	})
+
+	if len(prs) == 0 {
+		return c.Send(fmt.Sprintf("No PRs found for repo group *%s*.", repoGroup),
+			&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("*PRs in %s*\n\n", repoGroup))
+	for _, pr := range prs {
+		statusEmoji := "🔵"
+		switch pr.State {
+		case "merged":
+			statusEmoji = "🟣"
+		case "closed":
+			statusEmoji = "🔴"
+		case "spam":
+			statusEmoji = "⚠️"
+		}
+		sb.WriteString(fmt.Sprintf("%s *#%d* %s — by %s (%s/%s)\n",
+			statusEmoji, pr.PRNumber, truncate(pr.Title, 40), pr.Author, pr.Platform, pr.State))
+	}
+
+	return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+}
+
+// handleShowPR handles /pr command.
+func (b *Bot) handleShowPR(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	args := strings.Fields(c.Text())
+	if len(args) < 3 {
+		return c.Send("Usage: `/pr <repo_group> <pr_number>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	}
+
+	repoGroup := args[1]
+	prNumber, err := strconv.Atoi(args[2])
+	if err != nil {
+		return c.Send("Invalid PR number.")
+	}
+
+	var found *models.PRRecord
+	db.ForEach(db.BucketPRs, func(key, value []byte) error {
+		var pr models.PRRecord
+		if err := json.Unmarshal(value, &pr); err != nil {
+			return nil
+		}
+		if pr.RepoGroup == repoGroup && pr.PRNumber == prNumber {
+			found = &pr
+		}
+		return nil
+	})
+
+	if found == nil {
+		return c.Send(fmt.Sprintf("PR #%d not found in repo group *%s*.", prNumber, repoGroup),
+			&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	}
+
+	msg := fmt.Sprintf(
+		"*PR #%d* — %s\n\n"+
+			"  Author: %s\n"+
+			"  State: %s\n"+
+			"  Platform: %s\n"+
+			"  Repo Group: %s\n"+
+			"  Labels: %s\n"+
+			"  Spam: %v\n"+
+			"  Created: %s\n",
+		found.PRNumber, found.Title,
+		found.Author, found.State, found.Platform,
+		found.RepoGroup, strings.Join(found.Labels, ", "),
+		found.SpamFlag,
+		found.CreatedAt.Format(time.RFC3339),
+	)
+
+	// Add action buttons
+	selector := &telebot.ReplyMarkup{}
+	btnApprove := selector.Data("✅ Approve", "approve", fmt.Sprintf("%s#%s", repoGroup, found.ID))
+	btnClose := selector.Data("❌ Close", "close", fmt.Sprintf("%s#%s", repoGroup, found.ID))
+	btnSpam := selector.Data("🚫 Spam", "spam", fmt.Sprintf("%s#%s", repoGroup, found.ID))
+	btnReopen := selector.Data("🔄 Reopen", "reopen", fmt.Sprintf("%s#%s", repoGroup, found.ID))
+	selector.Inline(selector.Row(btnApprove, btnClose), selector.Row(btnSpam, btnReopen))
+
+	return c.Send(msg, &telebot.SendOptions{
+		ParseMode:   telebot.ModeMarkdown,
+		ReplyMarkup: selector,
+	})
+}
+
+// handleApprovePR handles /approve command.
+func (b *Bot) handleApprovePR(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	args := strings.Fields(c.Text())
+	if len(args) < 3 {
+		return c.Send("Usage: `/approve <repo_group> <pr_id>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	}
+
+	repoGroup := args[1]
+	prID := args[2]
+
+	pr, err := getPRByID(repoGroup, prID)
+	if err != nil || pr == nil {
+		return c.Send("PR not found.")
+	}
+
+	group := config.GetRepoGroupByName(b.cfg, repoGroup)
+	if group == nil {
+		return c.Send("Repo group not found.")
+	}
+
+	client := b.getClientForPlatform(pr.Platform)
+	if client == nil {
+		return c.Send(fmt.Sprintf("No client configured for platform %s.", pr.Platform))
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	if owner == "" || repo == "" {
+		return c.Send("Cannot resolve repository.")
+	}
+
+	ctx := context.Background()
+	if err := client.ApprovePR(ctx, owner, repo, pr.PRNumber); err != nil {
+		slog.Error("telegram bot: approve failed", "error", err)
+		return c.Send(fmt.Sprintf("Failed to approve PR: %v", err))
+	}
+
+	return c.Send(fmt.Sprintf("PR #%d approved.", pr.PRNumber))
+}
+
+// handleClosePR handles /close command.
+func (b *Bot) handleClosePR(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	args := strings.Fields(c.Text())
+	if len(args) < 3 {
+		return c.Send("Usage: `/close <repo_group> <pr_id>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	}
+
+	repoGroup := args[1]
+	prID := args[2]
+
+	pr, _ := getPRByID(repoGroup, prID)
+	if pr == nil {
+		return c.Send("PR not found.")
+	}
+
+	group := config.GetRepoGroupByName(b.cfg, repoGroup)
+	if group == nil {
+		return c.Send("Repo group not found.")
+	}
+
+	client := b.getClientForPlatform(pr.Platform)
+	if client == nil {
+		return c.Send("No client configured for platform.")
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+
+	ctx := context.Background()
+	if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+		return c.Send(fmt.Sprintf("Failed to close PR: %v", err))
+	}
+
+	return c.Send(fmt.Sprintf("PR #%d closed.", pr.PRNumber))
+}
+
+// handleReopenPR handles /reopen command.
+func (b *Bot) handleReopenPR(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	args := strings.Fields(c.Text())
+	if len(args) < 3 {
+		return c.Send("Usage: `/reopen <repo_group> <pr_id>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	}
+
+	repoGroup := args[1]
+	prID := args[2]
+
+	pr, _ := getPRByID(repoGroup, prID)
+	if pr == nil {
+		return c.Send("PR not found.")
+	}
+
+	group := config.GetRepoGroupByName(b.cfg, repoGroup)
+	if group == nil {
+		return c.Send("Repo group not found.")
+	}
+
+	client := b.getClientForPlatform(pr.Platform)
+	if client == nil {
+		return c.Send("No client configured for platform.")
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+
+	ctx := context.Background()
+	if err := client.ReopenPR(ctx, owner, repo, pr.PRNumber); err != nil {
+		return c.Send(fmt.Sprintf("Failed to reopen PR: %v", err))
+	}
+
+	// If this was a spam recovery, clear spam flag
+	if pr.SpamFlag {
+		pr.State = "open"
+		pr.SpamFlag = false
+		pr.UpdatedAt = time.Now()
+		data, _ := json.Marshal(pr)
+		db.Put(db.BucketPRs, fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data)
+	}
+
+	return c.Send(fmt.Sprintf("PR #%d reopened.", pr.PRNumber))
+}
+
+// handleMarkSpam handles /spam command.
+func (b *Bot) handleMarkSpam(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	args := strings.Fields(c.Text())
+	if len(args) < 3 {
+		return c.Send("Usage: `/spam <repo_group> <pr_id>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	}
+
+	repoGroup := args[1]
+	prID := args[2]
+
+	pr, _ := getPRByID(repoGroup, prID)
+	if pr == nil {
+		return c.Send("PR not found.")
+	}
+
+	// Mark as spam
+	pr.SpamFlag = true
+	pr.State = "spam"
+	pr.UpdatedAt = time.Now()
+
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	data, _ := json.Marshal(pr)
+	db.Put(db.BucketPRs, key, data)
+
+	// Close the PR on the platform
+	group := config.GetRepoGroupByName(b.cfg, repoGroup)
+	if group != nil {
+		client := b.getClientForPlatform(pr.Platform)
+		if client != nil {
+			owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+			client.ClosePR(context.Background(), owner, repo, pr.PRNumber)
+		}
+	}
+
+	// Send notification
+	if b.notifier != nil {
+		title := fmt.Sprintf("[Spam Alert] PR #%d by %s", pr.PRNumber, pr.Author)
+		body := fmt.Sprintf("PR #%d \"%s\" by %s marked as spam via Telegram.\nRepo: %s | Platform: %s",
+			pr.PRNumber, pr.Title, pr.Author, pr.RepoGroup, pr.Platform)
+		b.notifier.Send(context.Background(), title, body)
+	}
+
+	return c.Send(fmt.Sprintf("PR #%d marked as spam.", pr.PRNumber))
+}
+
+// handleShowQueue handles /queue command.
+func (b *Bot) handleShowQueue(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	args := strings.Fields(c.Text())
+	repoGroup := ""
+	if len(args) > 1 {
+		repoGroup = args[1]
+	} else {
+		groups := config.GetRepoGroups(b.cfg)
+		if len(groups) > 0 {
+			repoGroup = groups[0].Name
+		}
+	}
+
+	var items []models.QueueItem
+	db.ForEach(db.BucketQueueItems, func(key, value []byte) error {
+		var item models.QueueItem
+		if err := json.Unmarshal(value, &item); err != nil {
+			return nil
+		}
+		if repoGroup == "" || item.RepoGroup == repoGroup || strings.HasPrefix(string(key), repoGroup+"#") {
+			items = append(items, item)
+		}
+		return nil
+	})
+
+	if len(items) == 0 {
+		return c.Send(fmt.Sprintf("Queue empty for *%s*.", repoGroup),
+			&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("*Merge Queue — %s*\n\n", repoGroup))
+	for _, item := range items {
+		statusEmoji := "⏳"
+		switch item.Status {
+		case "done":
+			statusEmoji = "✅"
+		case "failed":
+			statusEmoji = "❌"
+		case "merging":
+			statusEmoji = "🔄"
+		}
+		sb.WriteString(fmt.Sprintf("%s %s (%s) — %s\n", statusEmoji, item.PRID, item.Status, item.AddedAt.Format(time.RFC3339)))
+	}
+
+	return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+}
+
+// handleRecheckQueue handles /recheck command.
+func (b *Bot) handleRecheckQueue(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	if b.queueMgr == nil {
+		return c.Send("Queue manager not initialized.")
+	}
+
+	go b.queueMgr.CheckQueue()
+	return c.Send("Queue recheck triggered.")
+}
+
+// handleShowConfig handles /config command.
+func (b *Bot) handleShowConfig(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	cfg := config.Current()
+	if cfg == nil {
+		return c.Send("Config not loaded.")
+	}
+
+	groups := config.GetRepoGroups(cfg)
+	var sb strings.Builder
+	sb.WriteString("*Current Config*\n\n")
+	sb.WriteString(fmt.Sprintf("  Server: %s (%s)\n", cfg.Server.Listen, cfg.Server.Mode))
+	sb.WriteString(fmt.Sprintf("  DB: %s\n", cfg.Database.Path))
+	sb.WriteString(fmt.Sprintf("  Events: %s\n", cfg.Events.Mode))
+	sb.WriteString(fmt.Sprintf("  Spam: enabled=%v\n", cfg.Spam.Enabled))
+	sb.WriteString(fmt.Sprintf("  Notify channels: %d\n", len(cfg.Notify)))
+	sb.WriteString(fmt.Sprintf("  Label rules: %d\n", len(cfg.LabelRules)))
+	sb.WriteString(fmt.Sprintf("  Repo groups: %d\n", len(groups)))
+	for _, g := range groups {
+		sb.WriteString(fmt.Sprintf("    - %s (%s)\n", g.Name, g.Mode))
+	}
+
+	return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+}
+
+// handleCallback handles inline button callbacks.
+func (b *Bot) handleCallback(c telebot.Context) error {
+	if !b.isAdmin(c) {
+		return c.Respond(&telebot.CallbackResponse{Text: "Access denied."})
+	}
+
+	data := c.Callback().Data
+	parts := strings.SplitN(data, ":", 2)
+	if len(parts) != 2 {
+		return c.Respond(&telebot.CallbackResponse{Text: "Invalid callback."})
+	}
+
+	action := parts[0]
+	payload := parts[1]
+
+	// payload format: repoGroup#prID
+	idx := strings.LastIndex(payload, "#")
+	if idx < 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "Invalid payload."})
+	}
+	repoGroup := payload[:idx]
+	prID := payload[idx+1:]
+
+	pr, _ := getPRByID(repoGroup, prID)
+	if pr == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "PR not found."})
+	}
+
+	group := config.GetRepoGroupByName(b.cfg, repoGroup)
+	if group == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "Repo group not found."})
+	}
+
+	client := b.getClientForPlatform(pr.Platform)
+	if client == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "No platform client."})
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	ctx := context.Background()
+
+	switch action {
+	case "approve":
+		if err := client.ApprovePR(ctx, owner, repo, pr.PRNumber); err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Failed: %v", err)})
+		}
+		c.Respond(&telebot.CallbackResponse{Text: "Approved ✅"})
+		c.Edit(fmt.Sprintf("%s\n\n_%s_", c.Message().Text, "✅ Approved via Telegram"),
+			&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+
+	case "close":
+		if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Failed: %v", err)})
+		}
+		c.Respond(&telebot.CallbackResponse{Text: "Closed ❌"})
+
+	case "reopen":
+		if err := client.ReopenPR(ctx, owner, repo, pr.PRNumber); err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Failed: %v", err)})
+		}
+		if pr.SpamFlag {
+			pr.State = "open"
+			pr.SpamFlag = false
+			pr.UpdatedAt = time.Now()
+			data, _ := json.Marshal(pr)
+			key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+			db.Put(db.BucketPRs, key, data)
+		}
+		c.Respond(&telebot.CallbackResponse{Text: "Reopened 🔄"})
+
+	case "spam":
+		pr.SpamFlag = true
+		pr.State = "spam"
+		pr.UpdatedAt = time.Now()
+		data, _ := json.Marshal(pr)
+		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+		db.Put(db.BucketPRs, key, data)
+		client.ClosePR(ctx, owner, repo, pr.PRNumber)
+		c.Respond(&telebot.CallbackResponse{Text: "Marked as spam 🚫"})
+	}
+
+	return nil
+}
+
+// handleText handles non-command text messages.
+func (b *Bot) handleText(c telebot.Context) error {
+	text := strings.TrimSpace(c.Text())
+	lower := strings.ToLower(text)
+
+	switch lower {
+	case "help", "menu":
+		return b.handleHelp(c)
+	case "prs", "list":
+		return b.handleListPRs(c)
+	case "queue":
+		return b.handleShowQueue(c)
+	case "config":
+		return b.handleShowConfig(c)
+	}
+
+	c.Send("Unknown command. Try /help for available commands.",
+		&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	return nil
+}
+
+// getClientForPlatform returns the platform client.
+func (b *Bot) getClientForPlatform(platform string) platforms.PlatformClient {
+	if b.clients == nil {
+		return nil
+	}
+	return b.clients[platforms.PlatformType(platform)]
+}
+
+// getPRByID finds a PR by repo group and ID/number.
+func getPRByID(repoGroup, idOrNumber string) (*models.PRRecord, error) {
+	var found *models.PRRecord
+	prNumber, _ := strconv.Atoi(idOrNumber)
+
+	db.ForEach(db.BucketPRs, func(key, value []byte) error {
+		var pr models.PRRecord
+		if err := json.Unmarshal(value, &pr); err != nil {
+			return nil
+		}
+		if pr.RepoGroup == repoGroup {
+			if pr.ID == idOrNumber || prNumber > 0 && pr.PRNumber == prNumber {
+				found = &pr
+			}
+		}
+		return nil
+	})
+
+	if found == nil {
+		return nil, fmt.Errorf("PR not found")
+	}
+	return found, nil
+}
+
+// truncate truncates a string to the specified length.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}

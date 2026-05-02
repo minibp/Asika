@@ -195,4 +195,13 @@ type Config struct {
 	SingleRepo   SingleRepoConfig  `toml:"single_repo" json:"single_repo"`
 	GitLabBaseURL string           `toml:"gitlab_base_url" json:"gitlab_base_url"`
 	GiteaBaseURL  string           `toml:"gitea_base_url" json:"gitea_base_url"`
+	Telegram      TelegramConfig   `toml:"telegram" json:"telegram"`
+}
+
+// TelegramConfig represents Telegram bot configuration
+type TelegramConfig struct {
+	Enabled   bool   `toml:"enabled" json:"enabled"`
+	Token     string `toml:"token" json:"token"`
+	AdminIDs  []int64 `toml:"admin_ids" json:"admin_ids"`
+	ChatIDs   []string `toml:"chat_ids" json:"chat_ids"`
 }
