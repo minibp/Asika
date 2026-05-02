@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.asika.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/asikad</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ASIKA_CONFIG</key>
+        <string>/usr/local/etc/asika_config.toml</string>
+        <key>GOMEMLIMIT</key>
+        <string>256MiB</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/usr/local/var/log/asikad.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/usr/local/var/log/asikad.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/usr/local/var/lib/asika</string>
+
+    <key>UserName</key>
+    <string>_asika</string>
+</dict>
+</plist>

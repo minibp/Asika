@@ -1,9 +1,13 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"asika/common/models"
 	"asika/common/notifier"
 	"asika/common/platforms"
+	"asika/common/utils"
 	"asika/daemon/consumer"
 	"asika/daemon/handlers"
 	"asika/daemon/platform"
@@ -26,6 +31,9 @@ import (
 )
 
 func main() {
+    desktopMode := flag.Bool("desktop", false, "Run in desktop foreground mode (open browser to WebUI)")
+    flag.Parse()
+
     // Load config
     configPath := os.Getenv("ASIKA_CONFIG")
     if configPath == "" {
@@ -39,6 +47,17 @@ func main() {
         slog.Warn("config not found, starting in initialization mode", "error", err)
         srv := server.NewServer(nil, nil)
         slog.Info("asikad starting in initialization mode")
+
+        if *desktopMode {
+            go func() {
+                time.Sleep(500 * time.Millisecond)
+                slog.Info("opening browser", "url", "http://localhost:8080")
+                if err := utils.OpenBrowser("http://localhost:8080"); err != nil {
+                    slog.Warn("failed to open browser", "error", err)
+                }
+            }()
+        }
+
         if err := srv.Start(); err != nil {
             slog.Error("server failed", "error", err)
             os.Exit(1)
@@ -136,6 +155,22 @@ func main() {
 
 	slog.Info("Asika daemon starting")
 	slog.Info("Copyright (R) 2026 The minibp developers. All rights reserved")
+
+	if *desktopMode {
+		listenAddr := ":8080"
+		if cfg.Server.Listen != "" {
+			listenAddr = cfg.Server.Listen
+		}
+		url := serverURL(listenAddr)
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			slog.Info("opening browser", "url", url)
+			if err := utils.OpenBrowser(url); err != nil {
+				slog.Warn("failed to open browser", "error", err)
+			}
+		}()
+	}
+
 	if err := srv.Start(); err != nil {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
@@ -276,4 +311,19 @@ func startFeishuBot(
 
 	go fsBot.Start()
 	slog.Info("feishu bot started", "app_id", cfg.Feishu.AppID)
+}
+
+// serverURL builds a browser URL from a listen address.
+func serverURL(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "http://localhost:8080"
+	}
+	if host == "" || host == "0.0.0.0" {
+		host = "localhost"
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("http://%s:%s", host, port)
 }
