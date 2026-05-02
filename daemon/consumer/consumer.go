@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"asika/common/config"
 	"asika/common/db"
 	"asika/common/events"
 	"asika/common/models"
@@ -19,12 +18,13 @@ import (
 
 // Consumer consumes events and processes them
 type Consumer struct {
-	cfg     *models.Config
-	clients map[platforms.PlatformType]platforms.PlatformClient
-	labeler *labeler.Labeler
-	syncer  *syncer.Syncer
-	queue   *queue.Manager
-	stop    chan struct{}
+	cfg          *models.Config
+	clients      map[platforms.PlatformType]platforms.PlatformClient
+	labeler      *labeler.Labeler
+	syncer       *syncer.Syncer
+	spamDetector *syncer.SpamDetector
+	queue        *queue.Manager
+	stop         chan struct{}
 }
 
 // NewConsumer creates a new event consumer (basic, no wiring)
@@ -38,14 +38,16 @@ func NewConsumer() *Consumer {
 func NewConsumerWithClients(cfg *models.Config, clients map[platforms.PlatformType]platforms.PlatformClient) *Consumer {
 	l := labeler.NewLabeler(clients)
 	s := syncer.NewSyncer(cfg, clients)
+	sd := syncer.NewSpamDetectorWithClients(cfg, clients)
 	q := queue.NewManager(cfg, clients)
 	return &Consumer{
-		cfg:     cfg,
-		clients: clients,
-		labeler: l,
-		syncer:  s,
-		queue:   q,
-		stop:    make(chan struct{}),
+		cfg:          cfg,
+		clients:      clients,
+		labeler:      l,
+		syncer:       s,
+		spamDetector: sd,
+		queue:        q,
+		stop:         make(chan struct{}),
 	}
 }
 
@@ -184,27 +186,8 @@ func (c *Consumer) handleSpamDetected(event events.Event) {
 
 	slog.Warn("spam detected", "title", pr.Title, "author", pr.Author)
 
-	// Mark as spam in bbolt
-	pr.SpamFlag = true
-	pr.State = "spam"
-	pr.UpdatedAt = time.Now()
-	key := fmt.Sprintf("%s#%s#%d", event.RepoGroup, event.Platform, pr.PRNumber)
-	data, _ := json.Marshal(pr)
-	db.Put(db.BucketPRs, key, data)
-
-	// Close PR via platform client
-	if c.clients != nil {
-		client := c.clients[platforms.PlatformType(pr.Platform)]
-		if client != nil {
-			group := config.GetRepoGroupByName(c.cfg, pr.RepoGroup)
-			if group != nil {
-				owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
-				ctx := context.Background()
-				if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
-					slog.Error("failed to close spam PR", "error", err)
-				}
-			}
-		}
+	if c.spamDetector != nil {
+		c.spamDetector.HandleSpam(pr, event.RepoGroup)
 	}
 }
 

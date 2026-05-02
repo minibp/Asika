@@ -110,6 +110,21 @@ func validate(cfg *models.Config) error {
 		return fmt.Errorf("auth.jwt_secret is required")
 	}
 
+	if cfg.Spam.Enabled {
+		if cfg.Spam.Threshold <= 0 {
+			return fmt.Errorf("spam.threshold must be greater than 0 when spam is enabled")
+		}
+		if cfg.Spam.TimeWindow == "" {
+			return fmt.Errorf("spam.time_window is required when spam is enabled")
+		}
+		if _, err := time.ParseDuration(cfg.Spam.TimeWindow); err != nil {
+			return fmt.Errorf("invalid spam.time_window: %w", err)
+		}
+		if !cfg.Spam.TriggerOnAuthor && len(cfg.Spam.TriggerOnTitleKw) == 0 {
+			return fmt.Errorf("spam requires at least one trigger: trigger_on_author or trigger_on_title_kw")
+		}
+	}
+
 	return nil
 }
 

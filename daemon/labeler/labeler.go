@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"path"
+	"regexp"
+	"strings"
 
 	"asika/common/config"
 	"asika/common/models"
@@ -106,7 +108,26 @@ func matchPattern(pattern string, files []string) bool {
 	return false
 }
 
+var compiledPatterns = make(map[string]*regexp.Regexp)
+
 func matchSinglePattern(pattern, file string) bool {
-	matched, _ := path.Match(pattern, file)
-	return matched
+	// If pattern looks like a glob (contains *, ?, [, ]), try glob first
+	if strings.ContainsAny(pattern, "*?[") {
+		matched, _ := path.Match(pattern, file)
+		if matched {
+			return true
+		}
+	}
+
+	// Try regex
+	re, ok := compiledPatterns[pattern]
+	if !ok {
+		var err error
+		re, err = regexp.Compile(pattern)
+		if err != nil {
+			return false
+		}
+		compiledPatterns[pattern] = re
+	}
+	return re.MatchString(file)
 }

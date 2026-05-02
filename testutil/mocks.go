@@ -9,13 +9,14 @@ import (
 
 // MockPlatformClient is a mock implementation of PlatformClient
 type MockPlatformClient struct {
-    PRs           map[string]*models.PRRecord
-    MergeMethods  []string
-    DefaultMethod string
-    Approvals     []string
-    CIStatus      string
-    DiffFiles     []string
-    Err           error
+	PRs           map[string]*models.PRRecord
+	MergeMethods  []string
+	DefaultMethod string
+	Approvals     []string
+	CIStatus      string
+	DiffFiles     []string
+	AppliedLabels []string
+	Err           error
 }
 
 // NewMockPlatformClient creates a new mock client
@@ -73,7 +74,8 @@ func (m *MockPlatformClient) CommentPR(ctx context.Context, owner, repo string, 
 }
 
 func (m *MockPlatformClient) AddLabel(ctx context.Context, owner, repo string, number int, label string) error {
-    return m.Err
+	m.AppliedLabels = append(m.AppliedLabels, label)
+	return m.Err
 }
 
 func (m *MockPlatformClient) RemoveLabel(ctx context.Context, owner, repo string, number int, label string) error {
@@ -81,7 +83,11 @@ func (m *MockPlatformClient) RemoveLabel(ctx context.Context, owner, repo string
 }
 
 func (m *MockPlatformClient) GetBranch(ctx context.Context, owner, repo, branch string) (bool, error) {
-    return true, m.Err
+	return true, m.Err
+}
+
+func (m *MockPlatformClient) ListBranches(ctx context.Context, owner, repo string) ([]string, error) {
+	return []string{"main", "develop"}, m.Err
 }
 
 func (m *MockPlatformClient) DeleteBranch(ctx context.Context, owner, repo, branch string) error {
