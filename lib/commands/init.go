@@ -95,8 +95,28 @@ var initCmd = &cobra.Command{
 			updateNotifyStr = "true"
 		}
 
+		// Stale
+		fmt.Print("Enable stale PR management? (y/n) ['n']: ")
+		staleEnabled, _ := reader.ReadString('\n')
+		staleEnabled = strings.TrimSpace(staleEnabled)
+		staleEnabledBool := strings.ToLower(staleEnabled) == "y" || strings.ToLower(staleEnabled) == "yes"
+		staleEnabledStr := "false"
+		if staleEnabledBool {
+			staleEnabledStr = "true"
+		}
+
+		staleInterval := "6h"
+		if staleEnabledBool {
+			fmt.Print("Check interval ['6h']: ")
+			si, _ := reader.ReadString('\n')
+			si = strings.TrimSpace(si)
+			if si != "" {
+				staleInterval = si
+			}
+		}
+
 		// Generate config
-		configTOML := generateConfigForInit(listen, mode, dbPath, jwtSecret, tokenExpiry, repoMode, updateCheckStr, updateInterval, updateNotifyStr)
+		configTOML := generateConfigForInit(listen, mode, dbPath, jwtSecret, tokenExpiry, repoMode, updateCheckStr, updateInterval, updateNotifyStr, staleEnabledStr, staleInterval)
 
 		// Send to server via HTTP
 		server := GetServer(cmd)
@@ -144,7 +164,7 @@ var initCmd = &cobra.Command{
 	},
 }
 
-func generateConfigForInit(listen, serverMode, dbPath, jwtSecret, tokenExpiry, repoMode, updateCheck, updateInterval, updateNotify string) string {
+func generateConfigForInit(listen, serverMode, dbPath, jwtSecret, tokenExpiry, repoMode, updateCheck, updateInterval, updateNotify, staleEnabled, staleInterval string) string {
 	if jwtSecret == "" {
 		jwtSecret = "change-me-in-init"
 	}
@@ -182,10 +202,18 @@ check         = %s
 interval      = "%s"
 notify_on_new = %s
 
+[stale]
+enabled        = %s
+check_interval = "%s"
+days_until_stale = 21
+days_until_close = 0
+stale_label    = "stale"
+exempt_labels  = ["long-term"]
+
 [[repo_groups]]
 name = "default"
 mode = "%s"
-`, listen, serverMode, dbPath, jwtSecret, tokenExpiry, updateCheck, updateInterval, updateNotify, repoMode)
+`, listen, serverMode, dbPath, jwtSecret, tokenExpiry, updateCheck, updateInterval, updateNotify, staleEnabled, staleInterval, repoMode)
 }
 
 func init() {

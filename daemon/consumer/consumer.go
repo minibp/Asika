@@ -13,6 +13,7 @@ import (
 	"asika/common/platforms"
 	"asika/daemon/labeler"
 	"asika/daemon/queue"
+	"asika/daemon/stale"
 	"asika/daemon/syncer"
 )
 
@@ -24,6 +25,7 @@ type Consumer struct {
 	syncer       *syncer.Syncer
 	spamDetector *syncer.SpamDetector
 	queue        *queue.Manager
+	staleMgr     *stale.Manager
 	stop         chan struct{}
 }
 
@@ -72,6 +74,11 @@ func (c *Consumer) Stop() {
 	close(c.stop)
 }
 
+// SetStaleManager sets the stale manager for activity detection
+func (c *Consumer) SetStaleManager(mgr *stale.Manager) {
+	c.staleMgr = mgr
+}
+
 func (c *Consumer) handleEvent(event events.Event) {
 	slog.Info("received event", "type", event.Type, "repo_group", event.RepoGroup, "platform", event.Platform)
 
@@ -117,6 +124,11 @@ func (c *Consumer) handlePROpened(event events.Event) {
 	// 2. Trigger label rule engine
 	if c.labeler != nil {
 		c.labeler.HandlePROpened(pr, event.RepoGroup)
+	}
+
+	// 3. Check for stale activity (remove stale label on new activity)
+	if c.staleMgr != nil {
+		c.staleMgr.HandleActivity(pr, event.RepoGroup)
 	}
 }
 
@@ -206,6 +218,11 @@ func (c *Consumer) handlePRReopened(event events.Event) {
 	key := fmt.Sprintf("%s#%s#%d", event.RepoGroup, event.Platform, pr.PRNumber)
 	data, _ := json.Marshal(pr)
 	db.Put(db.BucketPRs, key, data)
+
+	// Check for stale activity (remove stale label on re-open)
+	if c.staleMgr != nil {
+		c.staleMgr.HandleActivity(pr, event.RepoGroup)
+	}
 
 	// Spam reopen: bypass queue, use git cherry-pick to push to target branches
 	// This is per tasks.md 7.4: use common Git tools to cherry-pick PR commits

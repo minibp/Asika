@@ -100,6 +100,8 @@ func (b *TelegramBot) registerCommands() {
 	b.bot.Handle("/queue", b.handleShowQueue)
 	b.bot.Handle("/recheck", b.handleRecheckQueue)
 	b.bot.Handle("/config", b.handleShowConfig)
+	b.bot.Handle("/stalecheck", b.handleStaleCheck)
+	b.bot.Handle("/unstale", b.handleUnstale)
 
 	// Handle button callbacks for inline decisions
 	b.bot.Handle(telebot.OnCallback, b.handleCallback)
@@ -704,4 +706,195 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+func (b *TelegramBot) handleStaleCheck(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	args := strings.Fields(c.Text())
+	repoGroup := ""
+	if len(args) > 1 {
+		repoGroup = args[1]
+	}
+
+	dryRun := false
+	if len(args) > 2 && args[2] == "--dry-run" {
+		dryRun = true
+	}
+
+	cfg := config.Current()
+	if cfg == nil || !cfg.Stale.Enabled {
+		return c.Send("Stale PR management is not enabled in config.")
+	}
+
+	var groups []models.RepoGroup
+	if repoGroup != "" {
+		g := config.GetRepoGroupByName(cfg, repoGroup)
+		if g == nil {
+			return c.Send("Repo group not found: " + repoGroup)
+		}
+		groups = []models.RepoGroup{*g}
+	} else {
+		groups = config.GetRepoGroups(cfg)
+	}
+
+	var lines []string
+	if dryRun {
+		lines = append(lines, "*Stale PR Dry Run:*")
+	} else {
+		lines = append(lines, "*Stale PR Check Results:*")
+	}
+
+	for _, group := range groups {
+		prs, err := b.fetchOpenPRs(&group)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("- %s: error listing PRs", group.Name))
+			continue
+		}
+		for _, pr := range prs {
+			days := inactivityDays(pr.UpdatedAt)
+			hasStale := hasLabelStr(pr.Labels, cfg.Stale.StaleLabel, "stale")
+			isExempt := false
+			for _, exempt := range cfg.Stale.ExemptLabels {
+				if hasLabelStr(pr.Labels, exempt, "") {
+					isExempt = true
+					break
+				}
+			}
+			if cfg.Stale.SkipDraftPRs && pr.IsDraft {
+				continue
+			}
+			if isExempt {
+				continue
+			}
+			if hasStale && cfg.Stale.DaysUntilClose > 0 && days >= cfg.Stale.DaysUntilStale+cfg.Stale.DaysUntilClose {
+				lines = append(lines, fmt.Sprintf("- [CLOSE] #%d %s (%s, %dd stale)",
+					pr.PRNumber, truncate(pr.Title, 40), group.Name, days))
+			} else if !hasStale && days >= cfg.Stale.DaysUntilStale {
+				lines = append(lines, fmt.Sprintf("- [MARK] #%d %s (%s, %dd inactive)",
+					pr.PRNumber, truncate(pr.Title, 40), group.Name, days))
+			}
+		}
+	}
+
+	if len(lines) == 1 {
+		return c.Send("No stale PRs found.")
+	}
+	return c.Send(strings.Join(lines, "\n"), &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+}
+
+func (b *TelegramBot) handleUnstale(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
+	args := strings.Fields(c.Text())
+	if len(args) < 3 {
+		return c.Send("Usage: /unstale <repo_group> <pr_number>")
+	}
+
+	repoGroup := args[1]
+	prNumber := args[2]
+
+	cfg := config.Current()
+	if cfg == nil {
+		return c.Send("Config not loaded.")
+	}
+
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		return c.Send("Repo group not found: " + repoGroup)
+	}
+
+	label := cfg.Stale.StaleLabel
+	if label == "" {
+		label = "stale"
+	}
+
+	removed := false
+	for _, pt := range groupPlatforms(group) {
+		client, ok := b.clients[pt]
+		if !ok {
+			continue
+		}
+		owner, repo := config.GetOwnerRepoFromGroup(group, string(pt))
+		if owner == "" || repo == "" {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := client.RemoveLabel(ctx, owner, repo, parseInt(prNumber), label)
+		cancel()
+		if err != nil {
+			continue
+		}
+		removed = true
+	}
+
+	if !removed {
+		return c.Send("Failed to remove stale label.")
+	}
+	return c.Send("Stale label removed from PR #" + prNumber + " in " + repoGroup)
+}
+
+func (b *TelegramBot) fetchOpenPRs(group *models.RepoGroup) ([]*models.PRRecord, error) {
+	var prs []*models.PRRecord
+	for _, pt := range groupPlatforms(group) {
+		client, ok := b.clients[pt]
+		if !ok {
+			continue
+		}
+		owner, repo := config.GetOwnerRepoFromGroup(group, string(pt))
+		if owner == "" || repo == "" {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		list, err := client.ListPRs(ctx, owner, repo, "open")
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		prs = append(prs, list...)
+	}
+	return prs, nil
+}
+
+func groupPlatforms(group *models.RepoGroup) []platforms.PlatformType {
+	var result []platforms.PlatformType
+	if group.GitHub != "" {
+		result = append(result, platforms.PlatformGitHub)
+	}
+	if group.GitLab != "" {
+		result = append(result, platforms.PlatformGitLab)
+	}
+	if group.Gitea != "" {
+		result = append(result, platforms.PlatformGitea)
+	}
+	return result
+}
+
+func inactivityDays(lastActive time.Time) int {
+	dur := time.Since(lastActive)
+	return int(dur.Hours() / 24)
+}
+
+func hasLabelStr(labels []string, target, defaultLabel string) bool {
+	check := target
+	if check == "" {
+		check = defaultLabel
+	}
+	for _, l := range labels {
+		if l == check {
+			return true
+		}
+	}
+	return false
+}
+
+func parseInt(s string) int {
+	var n int
+	fmt.Sscanf(s, "%d", &n)
+	return n
 }

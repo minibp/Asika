@@ -55,6 +55,17 @@ func Load(path string) (*models.Config, error) {
 			Interval:    "24h",
 			NotifyOnNew: false,
 		},
+		Stale: models.StaleConfig{
+			Enabled:          false,
+			CheckInterval:    "6h",
+			DaysUntilStale:   21,
+			DaysUntilClose:   0,
+			StaleLabel:       "stale",
+			ExemptLabels:     []string{"long-term"},
+			NotifyOnStale:    true,
+			RemoveOnActivity: true,
+			SkipDraftPRs:     true,
+		},
 	}
 
     if err := toml.Unmarshal(data, cfg); err != nil {

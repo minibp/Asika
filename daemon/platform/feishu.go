@@ -251,6 +251,19 @@ func (b *FeishuBot) processCommand(senderID, text string) string {
 	case lower == "config" || lower == "/config":
 		return b.showConfigText()
 
+	case strings.HasPrefix(lower, "stalecheck") || strings.HasPrefix(lower, "/stalecheck") || strings.HasPrefix(lower, "stale-check") || strings.HasPrefix(lower, "/stale-check"):
+		groupName := ""
+		if len(parts) > 1 {
+			groupName = parts[1]
+		}
+		return b.doStaleCheckText(groupName)
+
+	case strings.HasPrefix(lower, "unstale ") || strings.HasPrefix(lower, "/unstale "):
+		if len(parts) < 3 {
+			return "Usage: unstale <repo_group> <pr_number>"
+		}
+		return b.doUnstale(senderID, parts[1], parts[2])
+
 	default:
 		return fmt.Sprintf("Unknown command: %s\nTry 'help' for available commands.", text)
 	}
@@ -267,7 +280,9 @@ func (b *FeishuBot) helpText() string {
   spam <group> <id>    - Mark as spam
   queue [group] - Show merge queue
   recheck       - Trigger queue recheck
-  config        - Show config summary`
+  config        - Show config summary
+  stalecheck [group] - Check for stale PRs
+  unstale <group> <id> - Remove stale label`
 }
 
 func (b *FeishuBot) listPRsText(repoGroup string) string {
@@ -503,4 +518,116 @@ func truncateStr(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+func (b *FeishuBot) doStaleCheckText(repoGroup string) string {
+	cfg := config.Current()
+	if cfg == nil || !cfg.Stale.Enabled {
+		return "Stale PR management is not enabled in config."
+	}
+
+	if repoGroup == "" {
+		groups := config.GetRepoGroups(b.cfg)
+		if len(groups) == 0 {
+			return "No repo groups configured."
+		}
+		repoGroup = groups[0].Name
+	}
+
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		return "Repo group not found: " + repoGroup
+	}
+
+	var lines []string
+	lines = append(lines, "Stale PR Check for "+repoGroup+":")
+
+	for _, pt := range groupPlatforms(group) {
+		client, ok := b.clients[pt]
+		if !ok {
+			continue
+		}
+		owner, repo := config.GetOwnerRepoFromGroup(group, string(pt))
+		if owner == "" || repo == "" {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		prs, err := client.ListPRs(ctx, owner, repo, "open")
+		cancel()
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("- %s: error listing PRs", pt))
+			continue
+		}
+		for _, pr := range prs {
+			if cfg.Stale.SkipDraftPRs && pr.IsDraft {
+				continue
+			}
+			isExempt := false
+			for _, exempt := range cfg.Stale.ExemptLabels {
+				if hasLabelStr(pr.Labels, exempt, "") {
+					isExempt = true
+					break
+				}
+			}
+			if isExempt {
+				continue
+			}
+			days := int(time.Since(pr.UpdatedAt).Hours() / 24)
+			hasStale := hasLabelStr(pr.Labels, cfg.Stale.StaleLabel, "stale")
+			if hasStale && cfg.Stale.DaysUntilClose > 0 && days >= cfg.Stale.DaysUntilStale+cfg.Stale.DaysUntilClose {
+				lines = append(lines, fmt.Sprintf("- [CLOSE] #%d %s", pr.PRNumber, truncateStr(pr.Title, 40)))
+			} else if !hasStale && days >= cfg.Stale.DaysUntilStale {
+				lines = append(lines, fmt.Sprintf("- [MARK] #%d %s", pr.PRNumber, truncateStr(pr.Title, 40)))
+			}
+		}
+	}
+
+	if len(lines) == 1 {
+		return "No stale PRs found in " + repoGroup
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (b *FeishuBot) doUnstale(senderID, repoGroup, prNumberStr string) string {
+	cfg := config.Current()
+	if cfg == nil {
+		return "Config not loaded."
+	}
+
+	group := config.GetRepoGroupByName(cfg, repoGroup)
+	if group == nil {
+		return "Repo group not found: " + repoGroup
+	}
+
+	label := cfg.Stale.StaleLabel
+	if label == "" {
+		label = "stale"
+	}
+
+	var n int
+	fmt.Sscanf(prNumberStr, "%d", &n)
+
+	removed := false
+	for _, pt := range groupPlatforms(group) {
+		client, ok := b.clients[pt]
+		if !ok {
+			continue
+		}
+		owner, repo := config.GetOwnerRepoFromGroup(group, string(pt))
+		if owner == "" || repo == "" {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := client.RemoveLabel(ctx, owner, repo, n, label)
+		cancel()
+		if err != nil {
+			continue
+		}
+		removed = true
+	}
+
+	if !removed {
+		return "Failed to remove stale label."
+	}
+	return "Stale label removed from PR #" + prNumberStr + " in " + repoGroup
 }

@@ -24,6 +24,7 @@ import (
 	"asika/daemon/platform"
 	"asika/daemon/polling"
 	"asika/daemon/queue"
+	"asika/daemon/stale"
 	"asika/daemon/syncer"
 )
 
@@ -113,7 +114,13 @@ func Bootstrap(cfg *models.Config) (*Server, error) {
 	// 12. Start periodic update check (if enabled)
 	startUpdateCheck(cfg)
 
-	// 13. Create server
+	// 13. Start stale PR checker (if enabled)
+	staleMgr := stale.NewManager(cfg, clients)
+	handlers.InitStaleManager(staleMgr)
+	eventConsumer.SetStaleManager(staleMgr)
+	startStaleCheck(cfg, staleMgr)
+
+	// 14. Create server
 	handlers.InitClients(clients)
 	srv := NewServer(cfg, clients)
 
@@ -277,4 +284,22 @@ func createNotifierFromConfig(nc models.NotifyConfig) notifier.Notifier {
 		return notifier.NewFeishuNotifier(nc.Config)
 	}
 	return nil
+}
+
+func startStaleCheck(cfg *models.Config, mgr *stale.Manager) {
+	if !cfg.Stale.Enabled {
+		return
+	}
+
+	interval := parseDuration(cfg.Stale.CheckInterval, 6*time.Hour)
+	go func() {
+		// Run once on startup
+		go mgr.CheckAllGroups()
+
+		ticker := time.NewTicker(interval)
+		for range ticker.C {
+			mgr.CheckAllGroups()
+		}
+	}()
+	slog.Info("stale checker started", "interval", interval)
 }

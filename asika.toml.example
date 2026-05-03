@@ -113,3 +113,23 @@ hookpath = ""
 check         = false    # periodically check for new versions
 interval      = "24h"    # check interval
 notify_on_new = false    # send notification through configured channels
+
+# Stale PR management
+[stale]
+enabled           = false           # enable stale PR detection
+check_interval    = "6h"            # how often to scan for stale PRs
+days_until_stale  = 21              # days inactive before marking as stale
+days_until_close  = 0               # days after stale to auto-close (0 = never)
+stale_label       = "stale"         # label to apply to stale PRs
+exempt_labels     = ["long-term"]   # labels that prevent stale marking
+notify_on_stale   = true            # send notification when PR is marked stale
+remove_stale_on_activity = true     # remove stale label on new activity
+skip_draft_prs    = true            # skip draft/WIP PRs
+
+# comment_on_stale = \"\"\"
+# This PR has been marked as stale due to {{.Days}} days of inactivity.
+# It will be closed in {{.CloseIn}} if no further activity occurs.
+# Add the `{{.ExemptLabel}}` label or leave a comment to keep it open.
+# \"\"\"
+#
+# comment_on_close = "Automatically closed due to inactivity."

@@ -38,8 +38,9 @@ type PRRecord struct {
     SpamFlag       bool      `json:"spam_flag"`
     CreatedAt      time.Time `json:"created_at"`
     UpdatedAt      time.Time `json:"updated_at"`
-    DiffFiles      []string  `json:"diff_files"` // changed file list for label rules
-    Events         []PREvent `json:"events"`
+	DiffFiles      []string  `json:"diff_files"` // changed file list for label rules
+	Events         []PREvent `json:"events"`
+	IsDraft        bool      `json:"is_draft"` // true if PR is a draft (GitHub) or WIP (GitLab)
 }
 
 // PREvent represents a pull request event
@@ -133,6 +134,21 @@ type UpdatesConfig struct {
     NotifyOnNew bool   `toml:"notify_on_new" json:"notify_on_new"`
 }
 
+// StaleConfig represents stale PR management configuration
+type StaleConfig struct {
+    Enabled              bool     `toml:"enabled" json:"enabled"`
+    CheckInterval        string   `toml:"check_interval" json:"check_interval"`
+    DaysUntilStale       int      `toml:"days_until_stale" json:"days_until_stale"`
+    DaysUntilClose       int      `toml:"days_until_close" json:"days_until_close"`
+    StaleLabel           string   `toml:"stale_label" json:"stale_label"`
+    ExemptLabels         []string `toml:"exempt_labels" json:"exempt_labels"`
+    NotifyOnStale        bool     `toml:"notify_on_stale" json:"notify_on_stale"`
+    CommentOnStale       string   `toml:"comment_on_stale" json:"comment_on_stale"`
+    CommentOnClose       string   `toml:"comment_on_close" json:"comment_on_close"`
+    RemoveOnActivity     bool     `toml:"remove_stale_on_activity" json:"remove_stale_on_activity"`
+    SkipDraftPRs         bool     `toml:"skip_draft_prs" json:"skip_draft_prs"`
+}
+
 // DatabaseConfig represents database configuration
 type DatabaseConfig struct {
     Path string `toml:"path"`
@@ -206,6 +222,7 @@ type Config struct {
 	Telegram      TelegramConfig   `toml:"telegram" json:"telegram"`
 	Feishu        FeishuConfig     `toml:"feishu" json:"feishu"`
 	Updates       UpdatesConfig    `toml:"updates" json:"updates"`
+	Stale         StaleConfig      `toml:"stale" json:"stale"`
 }
 
 // TelegramConfig represents Telegram bot configuration

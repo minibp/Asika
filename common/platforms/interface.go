@@ -27,6 +27,7 @@ type PlatformClient interface {
     CommentPR(ctx context.Context, owner, repo string, number int, body string) error
     AddLabel(ctx context.Context, owner, repo string, number int, label string) error
     RemoveLabel(ctx context.Context, owner, repo string, number int, label string) error
+    CreateLabel(ctx context.Context, owner, repo, name, color, description string) error
 
 	// Branch operations
 	GetBranch(ctx context.Context, owner, repo, branch string) (bool, error)

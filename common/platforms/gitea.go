@@ -240,6 +240,22 @@ func (c *GiteaClient) RemoveLabel(ctx context.Context, owner, repo string, numbe
 	return fmt.Errorf("label not found: %s", label)
 }
 
+func (c *GiteaClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
+	opts := gitea.CreateLabelOption{
+		Name:        name,
+		Color:       "#" + color,
+		Description: description,
+	}
+	_, _, err := c.client.CreateLabel(owner, repo, opts)
+	if err != nil {
+		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "409") || strings.Contains(err.Error(), "422") {
+			return nil
+		}
+		return fmt.Errorf("failed to create label: %w", err)
+	}
+	return nil
+}
+
 // GetBranch checks if a branch exists
 func (c *GiteaClient) GetBranch(ctx context.Context, owner, repo, branch string) (bool, error) {
 	_, _, err := c.client.GetRepoBranch(owner, repo, branch)

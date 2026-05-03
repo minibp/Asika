@@ -123,6 +123,7 @@ func gitLabMRToRecord(mr *gitlab.MergeRequest) *models.PRRecord {
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
 		Events:         []models.PREvent{},
+		IsDraft:        mr.WorkInProgress,
 	}
 }
 
@@ -277,6 +278,23 @@ func (c *GitLabClient) RemoveLabel(ctx context.Context, owner, repo string, numb
 	})
 	if err != nil {
 		return fmt.Errorf("failed to remove label: %w", err)
+	}
+	return nil
+}
+
+func (c *GitLabClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
+	project := owner + "/" + repo
+	opts := &gitlab.CreateLabelOptions{
+		Name:        &name,
+		Color:       &color,
+		Description: &description,
+	}
+	_, _, err := c.client.Labels.CreateLabel(project, opts)
+	if err != nil {
+		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "409") {
+			return nil
+		}
+		return fmt.Errorf("failed to create label: %w", err)
 	}
 	return nil
 }

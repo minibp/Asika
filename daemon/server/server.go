@@ -198,6 +198,15 @@ func (s *Server) setupRoutes() {
 			update.GET("/check", handlers.CheckForUpdate)
 			update.GET("/run", handlers.PerformWebUpdate)
 		}
+
+		// Stale PR management (admin only)
+		staleGroup := protected.Group("/stale")
+		staleGroup.Use(RequireRole("admin"))
+		{
+			staleGroup.POST("/check", handlers.HandleStaleCheck)
+			staleGroup.POST("/check/:repo_group", handlers.HandleStaleCheck)
+			staleGroup.POST("/unmark/:repo_group/:pr_number", handlers.HandleStaleUnmark)
+		}
 	}
 
 	// WebUI routes - server-rendered (SSR) per tasks.md 2.3

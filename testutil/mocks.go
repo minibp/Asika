@@ -82,6 +82,10 @@ func (m *MockPlatformClient) RemoveLabel(ctx context.Context, owner, repo string
     return m.Err
 }
 
+func (m *MockPlatformClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
+    return m.Err
+}
+
 func (m *MockPlatformClient) GetBranch(ctx context.Context, owner, repo, branch string) (bool, error) {
 	return true, m.Err
 }

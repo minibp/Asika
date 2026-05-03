@@ -81,6 +81,7 @@ func (c *GitHubClient) ListPRs(ctx context.Context, owner, repo string, state st
 				CreatedAt:      pr.GetCreatedAt().Time,
 				UpdatedAt:      pr.GetUpdatedAt().Time,
 				Events:         []models.PREvent{},
+				IsDraft:        pr.GetDraft(),
 			}
 			result = append(result, record)
 		}
@@ -178,6 +179,22 @@ func (c *GitHubClient) RemoveLabel(ctx context.Context, owner, repo string, numb
 	_, err := c.client.Issues.RemoveLabelForIssue(ctx, owner, repo, number, label)
 	if err != nil {
 		return fmt.Errorf("failed to remove label: %w", err)
+	}
+	return nil
+}
+
+func (c *GitHubClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
+	lbl := &github.Label{
+		Name:        &name,
+		Color:       &color,
+		Description: &description,
+	}
+	_, _, err := c.client.Issues.CreateLabel(ctx, owner, repo, lbl)
+	if err != nil {
+		if strings.Contains(err.Error(), "already_exists") {
+			return nil
+		}
+		return fmt.Errorf("failed to create label: %w", err)
 	}
 	return nil
 }

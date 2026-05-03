@@ -16,6 +16,10 @@
         <p id="openPRs">-</p>
     </div>
     <div class="stat-card">
+        <h3>Stale PRs</h3>
+        <p id="stalePRs">-</p>
+    </div>
+    <div class="stat-card">
         <h3>Queue Items</h3>
         <p id="queueItems">-</p>
     </div>
@@ -37,6 +41,13 @@
             const body = await resp.json();
             const prs = Array.isArray(body) ? body : (body.data || []);
             document.getElementById('openPRs').textContent = prs.length;
+
+            let staleCount = 0;
+            for (const pr of prs) {
+                if (pr.labels && pr.labels.includes('stale')) staleCount++;
+            }
+            document.getElementById('stalePRs').textContent = staleCount;
+
             const qResp = await apiRequest('/api/v1/queue/main');
             if (qResp.ok) {
                 const queue = await qResp.json();
