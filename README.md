@@ -7,15 +7,26 @@ detects spam, and applies labels — keeping everything clear and under control.
 
 ## Why Asika?
 
-1. **Stop tab-switching** — Check and manage PRs across GitHub, GitLab, and Gitea from one dashboard or chat.
-2. **Merge queue that won't merge too early** — Set approval counts and CI requirements; Asika waits until everything's green.
-3. **Spam? Handled.** — Auto-detects suspicious PRs by author frequency or title keywords, then closes them with a comment.
-4. **Labels on autopilot** — Define rules like `*.go → go` and Asika labels PRs the moment they open.
-5. **Chat ops** — Approve, close, or check queue from Telegram or Feishu (Lark) without touching a browser.
-6. **Hot reload** — Update label rules or notification channels without restarting the daemon.
-7. **Self-update** — Check for new versions and update in-place from GitHub Releases, with SHA256 verification and automatic rollback support.
-8. **Stale PR management** — Auto-detect and label stale PRs, close after threshold, and remove labels when activity resumes.
-9. **Single binary, zero drama** — No Node.js, no external git, just one Go binary and you're set.
+Managing pull requests across multiple platforms is messy.
+
+You switch between GitHub, GitLab, or Gitea, keep dozens of tabs open, and still risk merging too early or missing important changes.
+
+**Asika fixes this by giving you a single control plane to manage, automate, and safely merge PRs — without leaving your workflow.**
+
+### 🔹 One place for everything  
+No more tab-switching. See and manage PRs across platforms from one dashboard or chat.
+
+### 🔹 Safe merges, not early merges  
+Built-in merge queue ensures PRs are only merged when approvals and CI checks are complete.
+
+### 🔹 Automate the boring parts  
+Labels, stale PRs, and repetitive actions are handled automatically.
+
+### 🔹 Works where you already are  
+Approve, close, or check PRs directly from chat via Telegram or Feishu (Lark).
+
+### 🔹 Simple to run  
+Single binary. No Node.js. No external dependencies.
 
 ## Quick Start
 
