@@ -9,13 +9,19 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	lark "github.com/larksuite/oapi-sdk-go/v3"
+	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
 // FeishuNotifier sends notifications via Feishu/Lark
 type FeishuNotifier struct {
-	webhookURL string
-	appID     string
-	appSecret string
+	webhookURL      string
+	appID           string
+	appSecret       string
+	chatIDs         []string
+	client          *lark.Client
+	receiveIDType   string
 }
 
 // NewFeishuNotifier creates a new Feishu notifier.
@@ -28,12 +34,27 @@ func NewFeishuNotifier(config map[string]interface{}) *FeishuNotifier {
 	webhookURL, _ := config["webhook_url"].(string)
 	appID, _ := config["app_id"].(string)
 	appSecret, _ := config["app_secret"].(string)
+	receiveIDType, _ := config["receive_id_type"].(string)
+	if receiveIDType == "" {
+		receiveIDType = "chat_id" // default
+	}
 
 	n.webhookURL = webhookURL
+	n.receiveIDType = receiveIDType
+
+	// Parse chat IDs (same as Telegram's "to" config)
+	if toList, ok := config["to"].([]interface{}); ok {
+		for _, t := range toList {
+			if s, ok := t.(string); ok && s != "" {
+				n.chatIDs = append(n.chatIDs, s)
+			}
+		}
+	}
 
 	if appID != "" && appSecret != "" {
 		n.appID = appID
 		n.appSecret = appSecret
+		n.client = lark.NewClient(appID, appSecret)
 	}
 
 	return n
@@ -51,12 +72,14 @@ func (n *FeishuNotifier) WebhookURL() string {
 
 // Send sends a notification via Feishu webhook or IM API.
 func (n *FeishuNotifier) Send(ctx context.Context, title, body string) error {
-	if n.webhookURL != "" {
-		return n.sendViaWebhook(ctx, title, body)
+	// App mode: use SDK to send to multiple recipients
+	if n.client != nil && len(n.chatIDs) > 0 {
+		return n.sendViaApp(ctx, title, body)
 	}
 
-	if n.appID != "" && n.appSecret != "" {
-		return n.sendViaApp(ctx, title, body)
+	// Webhook mode: send to single webhook URL
+	if n.webhookURL != "" {
+		return n.sendViaWebhook(ctx, title, body)
 	}
 
 	return fmt.Errorf("feishu: no webhook_url or app credentials configured")
@@ -100,11 +123,59 @@ func (n *FeishuNotifier) sendViaWebhook(ctx context.Context, title, body string)
 
 // sendViaApp sends via Feishu IM API (requires app credentials)
 func (n *FeishuNotifier) sendViaApp(ctx context.Context, title, body string) error {
-	// This would use the full SDK to send messages via the IM API
-	// For now, we log it since the SDK needs a proper client setup
-	slog.Warn("feishu: app mode not fully implemented, use webhook mode instead",
-		"title", title)
-	return fmt.Errorf("feishu: app mode send not implemented, use webhook mode")
+	if n.client == nil {
+		return fmt.Errorf("feishu: client not initialized")
+	}
+
+	// Build message content
+	content := fmt.Sprintf(`{"text":"%s\n\n%s"}`, escapeFeishu(title), escapeFeishu(body))
+
+	// Determine receive ID type
+	receiveIDType := larkim.ReceiveIdTypeChatId // default
+	switch n.receiveIDType {
+	case "open_id":
+		receiveIDType = larkim.ReceiveIdTypeOpenId
+	case "user_id":
+		receiveIDType = larkim.ReceiveIdTypeUserId
+	case "email":
+		receiveIDType = larkim.ReceiveIdTypeEmail
+	case "chat_id":
+		receiveIDType = larkim.ReceiveIdTypeChatId
+	}
+
+	var lastErr error
+	targets := n.chatIDs
+	if len(targets) == 0 {
+		return fmt.Errorf("feishu: no chat IDs configured for app mode")
+	}
+
+	for _, receiveID := range targets {
+		resp, err := n.client.Im.Message.Create(ctx, larkim.NewCreateMessageReqBuilder().
+			ReceiveIdType(receiveIDType).
+			Body(larkim.NewCreateMessageReqBodyBuilder().
+				MsgType(larkim.MsgTypeText).
+				ReceiveId(receiveID).
+				Content(content).
+				Build()).
+			Build())
+
+		if err != nil {
+			slog.Error("feishu app: failed to send", "target", receiveID, "error", err)
+			lastErr = err
+			continue
+		}
+		if !resp.Success() {
+			slog.Error("feishu app: send failed", "target", receiveID, "code", resp.Code, "msg", resp.Msg)
+			lastErr = fmt.Errorf("send failed: %s", resp.Msg)
+			continue
+		}
+		slog.Info("feishu notification sent via app", "target", receiveID)
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("feishu app send failed for some recipients: %w", lastErr)
+	}
+	return nil
 }
 
 // formatFeishuCard builds a simple Feishu card message.

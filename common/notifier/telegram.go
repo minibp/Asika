@@ -1,9 +1,12 @@
 package notifier
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 
 	"gopkg.in/telebot.v3"
@@ -11,9 +14,10 @@ import (
 
 // TelegramNotifier sends notifications via Telegram Bot
 type TelegramNotifier struct {
-	bot *telebot.Bot
-	// chatIDs can be user IDs, group IDs, or channel usernames
-	chatIDs []string
+	bot        *telebot.Bot
+	chatIDs    []string
+	httpToken  string
+	httpAPIURL string
 }
 
 // NewTelegramNotifier creates a new Telegram notifier
@@ -24,15 +28,34 @@ func NewTelegramNotifier(config map[string]interface{}) *TelegramNotifier {
 		return nil
 	}
 
-	pref := telebot.Settings{
-		Token:  token,
-		Poller: &telebot.LongPoller{Timeout: 10},
+	// Check if http mode is requested (webhook_url or explicit http_token)
+	httpToken := ""
+	if webhookURL, ok := config["webhook_url"].(string); ok && webhookURL != "" {
+		// Extract token from webhook URL or use the main token
+		httpToken = token
+	}
+	if t, ok := config["http_token"].(string); ok && t != "" {
+		httpToken = t
 	}
 
-	bot, err := telebot.NewBot(pref)
-	if err != nil {
-		slog.Error("telegram notifier: failed to create bot", "error", err)
-		return nil
+	n := &TelegramNotifier{
+		httpToken:  httpToken,
+		httpAPIURL: "https://api.telegram.org",
+	}
+
+	// Init SDK bot only if not using HTTP mode
+	if httpToken == "" {
+		pref := telebot.Settings{
+			Token:  token,
+			Poller: &telebot.LongPoller{Timeout: 10},
+		}
+
+		bot, err := telebot.NewBot(pref)
+		if err != nil {
+			slog.Error("telegram notifier: failed to create bot", "error", err)
+			return nil
+		}
+		n.bot = bot
 	}
 
 	chatIDs := make([]string, 0)
@@ -44,10 +67,8 @@ func NewTelegramNotifier(config map[string]interface{}) *TelegramNotifier {
 		}
 	}
 
-	return &TelegramNotifier{
-		bot:     bot,
-		chatIDs: chatIDs,
-	}
+	n.chatIDs = chatIDs
+	return n
 }
 
 // Type returns the type of notifier
@@ -69,6 +90,16 @@ func (n *TelegramNotifier) ChatIDs() []string {
 func (n *TelegramNotifier) Send(ctx context.Context, title, body string) error {
 	if len(n.chatIDs) == 0 {
 		return fmt.Errorf("no chat IDs configured for telegram notifier")
+	}
+
+	// HTTP mode: direct API call (no SDK)
+	if n.httpToken != "" {
+		return n.sendViaHTTP(ctx, title, body)
+	}
+
+	// SDK mode: use telebot (requires bot instance)
+	if n.bot == nil {
+		return fmt.Errorf("telegram: bot not initialized")
 	}
 
 	message := fmt.Sprintf("*%s*\n\n%s", title, body)
@@ -94,6 +125,56 @@ func (n *TelegramNotifier) Send(ctx context.Context, title, body string) error {
 
 	if lastErr != nil {
 		return fmt.Errorf("telegram send failed for some recipients: %w", lastErr)
+	}
+	return nil
+}
+
+// sendViaHTTP sends notification via Telegram HTTP API (no SDK needed)
+func (n *TelegramNotifier) sendViaHTTP(ctx context.Context, title, body string) error {
+	message := fmt.Sprintf("*%s*\n\n%s", title, body)
+
+	var lastErr error
+	for _, chatID := range n.chatIDs {
+		apiURL := fmt.Sprintf("%s/bot%s/sendMessage", n.httpAPIURL, n.httpToken)
+
+		payload := map[string]interface{}{
+			"chat_id":    chatID,
+			"text":       message,
+			"parse_mode": "Markdown",
+		}
+
+		data, err := json.Marshal(payload)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(data))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			slog.Error("telegram http: send failed", "chat_id", chatID, "error", err)
+			lastErr = err
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			slog.Error("telegram http: send failed", "chat_id", chatID, "status", resp.StatusCode)
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			continue
+		}
+
+		slog.Info("telegram notification sent via http", "chat_id", chatID)
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("telegram http send failed for some recipients: %w", lastErr)
 	}
 	return nil
 }

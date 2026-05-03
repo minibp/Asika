@@ -57,8 +57,20 @@ type   = "smtp"
 config = { host = "smtp.example.com", port = 587, username = "bot@example.com", password = "change-me", to = ["admin@example.com"] }
 
 # [[notify]]
-# type   = "wecom"
-# config = { webhook_url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY" }
+# type   = "feishu"
+# config = { webhook_url = "https://open.feishu.cn/open-apis/bot/v2/hook/xxx" }
+
+# [[notify]]
+# type   = "feishu"
+# config = { app_id = "cli_xxx", app_secret = "yyy", to = ["oc_xxx", "ou_xxx"], receive_id_type = "chat_id" }
+
+# [[notify]]
+# type   = "telegram"
+# config = { token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", to = ["@mychannel", "12345678"] }
+
+# [[notify]]
+# type   = "telegram"
+# config = { token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", to = ["@mychannel"], http_token = "same_or_different_token" }
 
 # [[notify]]
 # type   = "github_at"
