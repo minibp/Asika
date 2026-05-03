@@ -1,0 +1,239 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.0'
+
+      - name: Build binaries
+        run: |
+          PLATFORMS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
+          for platform in $PLATFORMS; do
+            GOOS=${platform%/*}
+            GOARCH=${platform#*/}
+            for binary in asika asikad; do
+              mkdir -p bin
+              GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w" \
+                -o bin/${binary}-${GOOS}-${GOARCH} ./cmd/${binary}
+            done
+          done
+          # Create tar.gz for each binary
+          cd bin
+          for f in *; do
+            tar -czf ${f}.tar.gz $f
+          done
+          cd ..
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: |
+            bin/*.tar.gz
+
+  package-deb:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            goarch: amd64
+          - arch: arm64
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Checkout pack
+        uses: actions/checkout@v4
+        with:
+          repository: AsikaProject/pack
+          path: pack
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract binaries
+        run: |
+          cd bin
+          for f in *.tar.gz; do
+            tar -xzf $f
+          done
+          cd ..
+          cp bin/asika-linux-${{ matrix.goarch }} asika || true
+          cp bin/asikad-linux-${{ matrix.goarch }} asikad || true
+
+      - name: Package DEB
+        run: bash pack/scripts/package-deb.sh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-packages
+          path: dist/*.deb
+
+  package-dmg:
+    needs: build
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            goarch: amd64
+          - arch: arm64
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Checkout pack
+        uses: actions/checkout@v4
+        with:
+          repository: AsikaProject/pack
+          path: pack
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract binaries
+        run: |
+          cd bin
+          for f in *.tar.gz; do
+            tar -xzf $f
+          done
+          cd ..
+          cp bin/asikad-darwin-${{ matrix.goarch }} asikad || true
+
+      - name: Package DMG
+        run: bash pack/scripts/package-dmg.sh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg-packages
+          path: dist/*.dmg
+
+  package-nsis:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Checkout pack
+        uses: actions/checkout@v4
+        with:
+          repository: AsikaProject/pack
+          path: pack
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract binaries
+        shell: bash
+        run: |
+          cd bin
+          for f in *.tar.gz; do
+            tar -xzf $f
+          done
+          cd ..
+          cp bin/asika-windows-amd64.exe asika.exe || true
+          cp bin/asikad-windows-amd64.exe asikad.exe || true
+
+      - name: Package NSIS
+        shell: bash
+        run: bash pack/scripts/package-nsis.sh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nsis-packages
+          path: dist/*-setup.exe
+
+  package-docker:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Checkout pack
+        uses: actions/checkout@v4
+        with:
+          repository: AsikaProject/pack
+          path: pack
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract binaries
+        run: |
+          cd bin
+          for f in *.tar.gz; do
+            tar -xzf $f
+          done
+          cd ..
+          cp bin/asika-linux-amd64 asika || true
+          cp bin/asikad-linux-amd64 asikad || true
+
+      - name: Package Docker
+        run: bash pack/scripts/package-docker.sh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    needs: [build, package-deb, package-dmg, package-nsis, package-docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          cp binaries/* release-assets/ 2>/dev/null || true
+          cp deb-packages/* release-assets/ 2>/dev/null || true
+          cp dmg-packages/* release-assets/ 2>/dev/null || true
+          cp nsis-packages/* release-assets/ 2>/dev/null || true
+          ls -lh release-assets/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
