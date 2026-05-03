@@ -91,7 +91,7 @@ jobs:
           name: deb-packages
           path: dist/*.deb
 
-  package-dmg:
+  package-pkg:
     needs: build
     runs-on: macos-latest
     strategy:
@@ -125,15 +125,15 @@ jobs:
           cd ..
           cp bin/asikad-darwin-${{ matrix.goarch }} asikad || true
 
-      - name: Package DMG
-        run: bash pack/scripts/package-dmg.sh
+      - name: Package PKG
+        run: bash pack/scripts/package-pkg.sh
         env:
           TAG_NAME: ${{ github.ref_name }}
 
       - uses: actions/upload-artifact@v6
         with:
-          name: dmg-packages
-          path: dist/*.dmg
+          name: pkg-packages
+          path: dist/*.pkg
 
   package-nsis:
     needs: build
@@ -211,7 +211,7 @@ jobs:
           DOCKER_IMAGE_NAME: asikaproject/asika
 
   release:
-    needs: [build, package-deb, package-dmg, package-nsis, package-docker]
+    needs: [build, package-deb, package-pkg, package-nsis, package-docker]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v6
@@ -221,7 +221,7 @@ jobs:
           mkdir -p release-assets
           cp binaries/* release-assets/ 2>/dev/null || true
           cp deb-packages/* release-assets/ 2>/dev/null || true
-          cp dmg-packages/* release-assets/ 2>/dev/null || true
+          cp pkg-packages/* release-assets/ 2>/dev/null || true
           cp nsis-packages/* release-assets/ 2>/dev/null || true
           ls -lh release-assets/
 
