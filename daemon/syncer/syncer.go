@@ -1,50 +1,56 @@
 package syncer
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"log/slog"
-	"strings"
-	"time"
+    "context"
+    "encoding/json"
+    "fmt"
+    "log/slog"
+    "strings"
+    "sync"
+    "time"
 
-	"asika/common/config"
-	"asika/common/db"
-	"asika/common/models"
-	"asika/common/gitutil"
-	"asika/common/platforms"
-	"asika/daemon/hooks"
+    "asika/common/config"
+    "asika/common/db"
+    "asika/common/models"
+    "asika/common/gitutil"
+    "asika/common/platforms"
+    "asika/daemon/hooks"
 
-	"github.com/google/uuid"
+    "github.com/google/uuid"
 )
 
 // Syncer handles cross-platform synchronization
 type Syncer struct {
-	cfg     *models.Config
-	clients map[platforms.PlatformType]platforms.PlatformClient
+    cfg       *models.Config
+    clients   map[platforms.PlatformType]platforms.PlatformClient
+    syncLocks sync.Map
 }
 
 // NewSyncer creates a new syncer
 func NewSyncer(cfg *models.Config, clients map[platforms.PlatformType]platforms.PlatformClient) *Syncer {
-	return &Syncer{
-		cfg:     cfg,
-		clients: clients,
-	}
+    return &Syncer{
+        cfg:     cfg,
+        clients: clients,
+    }
 }
 
 // SyncOnMerge handles a merge event and syncs to other platforms
 func (s *Syncer) SyncOnMerge(ctx context.Context, pr *models.PRRecord) error {
-	group := config.GetRepoGroupByName(s.cfg, pr.RepoGroup)
-	if group == nil {
-		return fmt.Errorf("repo group not found: %s", pr.RepoGroup)
-	}
+    group := config.GetRepoGroupByName(s.cfg, pr.RepoGroup)
+    if group == nil {
+        return fmt.Errorf("repo group not found: %s", pr.RepoGroup)
+    }
 
-	if group.Mode != "multi" {
-		slog.Info("skipping sync: repo group not in multi mode", "repo_group", pr.RepoGroup)
-		return nil
-	}
+    if group.Mode != "multi" {
+        slog.Info("skipping sync: repo group not in multi mode", "repo_group", pr.RepoGroup)
+        return nil
+    }
 
-	// Create temp workdir for this sync
+    mu := s.getOrCreateLock(pr.RepoGroup)
+    mu.Lock()
+    defer mu.Unlock()
+
+    // Create temp workdir for this sync
 	workdir, err := gitutil.CreateTempWorkdir("asika-sync-")
 	if err != nil {
 		return fmt.Errorf("failed to create workdir: %w", err)
@@ -88,7 +94,7 @@ func (s *Syncer) SyncOnMerge(ctx context.Context, pr *models.PRRecord) error {
 	// Cherry-pick the merge commit
 	if err := gitutil.CherryPick(gitRepo, pr.MergeCommitSHA); err != nil {
 		slog.Error("cherry-pick failed", "commit", pr.MergeCommitSHA, "error", err)
-		s.recordSync(pr, "", "failed", fmt.Sprintf("cherry-pick failed: %v", err))
+		s.recordSync(pr, group.DefaultBranch, "", "failed", fmt.Sprintf("cherry-pick failed: %v", err))
 		return fmt.Errorf("cherry-pick failed: %w", err)
 	}
 
@@ -121,11 +127,11 @@ func (s *Syncer) SyncOnMerge(ctx context.Context, pr *models.PRRecord) error {
 		// Push to target platform
 		if err := gitutil.Push(gitRepo, remoteName, group.DefaultBranch, targetToken); err != nil {
 			slog.Error("push failed", "target", target.name, "error", err)
-			s.recordSync(pr, target.name, "failed", fmt.Sprintf("push to %s failed: %v", target.name, err))
+			s.recordSync(pr, group.DefaultBranch, target.name, "failed", fmt.Sprintf("push to %s failed: %v", target.name, err))
 			continue
 		}
 
-		s.recordSync(pr, target.name, "success", "")
+		s.recordSync(pr, group.DefaultBranch, target.name, "success", "")
 		slog.Info("sync completed", "target", target.name)
 	}
 
@@ -176,19 +182,19 @@ func (s *Syncer) SyncBranchDeletion(repoGroup, sourcePlatform, branch string) {
 }
 
 // recordSync records sync history in bbolt
-func (s *Syncer) recordSync(pr *models.PRRecord, targetPlatform, status, errorMsg string) {
-	record := models.SyncRecord{
-		ID:             uuid.New().String(),
-		PRID:           pr.ID,
-		RepoGroup:      pr.RepoGroup,
-		SourcePlatform: pr.Platform,
-		TargetPlatform: targetPlatform,
-		Branch:         s.cfg.RepoGroups[0].DefaultBranch,
-		CommitSHA:      pr.MergeCommitSHA,
-		Status:         status,
-		ErrorMessage:   errorMsg,
-		Timestamp:      time.Now(),
-	}
+func (s *Syncer) recordSync(pr *models.PRRecord, branch, targetPlatform, status, errorMsg string) {
+    record := models.SyncRecord{
+        ID:             uuid.New().String(),
+        PRID:           pr.ID,
+        RepoGroup:      pr.RepoGroup,
+        SourcePlatform: pr.Platform,
+        TargetPlatform: targetPlatform,
+        Branch:         branch,
+        CommitSHA:      pr.MergeCommitSHA,
+        Status:         status,
+        ErrorMessage:   errorMsg,
+        Timestamp:      time.Now(),
+    }
 
 	data, _ := json.Marshal(record)
 	db.Put(db.BucketSyncHistory, record.ID, data)
@@ -209,28 +215,33 @@ func (s *Syncer) getTokenForPlatform(platform string) string {
 
 // getRepoURL returns the clone URL for a platform repo
 func (s *Syncer) getRepoURL(platform, repo string) string {
-	parts := strings.SplitN(repo, "/", 2)
-	if len(parts) != 2 {
-		return ""
-	}
+    parts := strings.SplitN(repo, "/", 2)
+    if len(parts) != 2 {
+        return ""
+    }
 
-	switch platforms.PlatformType(platform) {
-	case platforms.PlatformGitHub:
-		return fmt.Sprintf("https://github.com/%s/%s.git", parts[0], parts[1])
-	case platforms.PlatformGitLab:
-		base := s.cfg.GitLabBaseURL
-		if base == "" {
-			base = "https://gitlab.com"
-		}
-		base = strings.TrimSuffix(base, "/")
-		return fmt.Sprintf("%s/%s/%s.git", base, parts[0], parts[1])
-	case platforms.PlatformGitea:
-		base := s.cfg.GiteaBaseURL
-		if base == "" {
-			base = "https://gitea.example.com"
-		}
-		base = strings.TrimSuffix(base, "/")
-		return fmt.Sprintf("%s/%s/%s.git", base, parts[0], parts[1])
-	}
-	return ""
+    switch platforms.PlatformType(platform) {
+    case platforms.PlatformGitHub:
+        return fmt.Sprintf("https://github.com/%s/%s.git", parts[0], parts[1])
+    case platforms.PlatformGitLab:
+        base := s.cfg.GitLabBaseURL
+        if base == "" {
+            base = "https://gitlab.com"
+        }
+        base = strings.TrimSuffix(base, "/")
+        return fmt.Sprintf("%s/%s/%s.git", base, parts[0], parts[1])
+    case platforms.PlatformGitea:
+        base := s.cfg.GiteaBaseURL
+        if base == "" {
+            base = "https://gitea.example.com"
+        }
+        base = strings.TrimSuffix(base, "/")
+        return fmt.Sprintf("%s/%s/%s.git", base, parts[0], parts[1])
+    }
+    return ""
+}
+
+func (s *Syncer) getOrCreateLock(repoGroup string) *sync.Mutex {
+    actual, _ := s.syncLocks.LoadOrStore(repoGroup, &sync.Mutex{})
+    return actual.(*sync.Mutex)
 }

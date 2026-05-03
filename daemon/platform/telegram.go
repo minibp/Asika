@@ -410,11 +410,11 @@ func (b *TelegramBot) handleReopenPR(c telebot.Context) error {
 
 	// If this was a spam recovery, clear spam flag
 	if pr.SpamFlag {
-		pr.State = "open"
-		pr.SpamFlag = false
-		pr.UpdatedAt = time.Now()
-		data, _ := json.Marshal(pr)
-		db.Put(db.BucketPRs, fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data)
+pr.State = "open"
+        pr.SpamFlag = false
+        pr.UpdatedAt = time.Now()
+        data, _ := json.Marshal(pr)
+        db.PutPRWithIndex(fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data, pr.ID, pr.RepoGroup, pr.PRNumber)
 	}
 
 	return c.Send(fmt.Sprintf("PR #%d reopened.", pr.PRNumber))
@@ -444,12 +444,12 @@ func (b *TelegramBot) handleMarkSpam(c telebot.Context) error {
 	pr.State = "spam"
 	pr.UpdatedAt = time.Now()
 
-	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
-	data, _ := json.Marshal(pr)
-	db.Put(db.BucketPRs, key, data)
+key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+    data, _ := json.Marshal(pr)
+    db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
 
-	// Close the PR on the platform
-	group := config.GetRepoGroupByName(b.cfg, repoGroup)
+    // Close the PR on the platform
+    group := config.GetRepoGroupByName(b.cfg, repoGroup)
 	if group != nil {
 		client := b.getClientForPlatform(pr.Platform)
 		if client != nil {
@@ -623,23 +623,23 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 		if err := client.ReopenPR(ctx, owner, repo, pr.PRNumber); err != nil {
 			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Failed: %v", err)})
 		}
-		if pr.SpamFlag {
-			pr.State = "open"
-			pr.SpamFlag = false
-			pr.UpdatedAt = time.Now()
-			data, _ := json.Marshal(pr)
-			key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
-			db.Put(db.BucketPRs, key, data)
-		}
-		c.Respond(&telebot.CallbackResponse{Text: "Reopened 🔄"})
+if pr.SpamFlag {
+            pr.State = "open"
+            pr.SpamFlag = false
+            pr.UpdatedAt = time.Now()
+            data, _ := json.Marshal(pr)
+            key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+            db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
+        }
+        c.Respond(&telebot.CallbackResponse{Text: "Reopened 🔄"})
 
-	case "spam":
-		pr.SpamFlag = true
-		pr.State = "spam"
-		pr.UpdatedAt = time.Now()
-		data, _ := json.Marshal(pr)
-		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
-		db.Put(db.BucketPRs, key, data)
+    case "spam":
+        pr.SpamFlag = true
+        pr.State = "spam"
+        pr.UpdatedAt = time.Now()
+        data, _ := json.Marshal(pr)
+        key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+        db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
 		client.ClosePR(ctx, owner, repo, pr.PRNumber)
 		c.Respond(&telebot.CallbackResponse{Text: "Marked as spam 🚫"})
 	}

@@ -405,12 +405,12 @@ func (b *FeishuBot) doMarkSpam(senderID, repoGroup, prID string) string {
 	if pr == nil {
 		return "PR not found."
 	}
-	pr.SpamFlag = true
-	pr.State = "spam"
-	pr.UpdatedAt = time.Now()
-	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
-	data, _ := json.Marshal(pr)
-	db.Put(db.BucketPRs, key, data)
+pr.SpamFlag = true
+    pr.State = "spam"
+    pr.UpdatedAt = time.Now()
+    key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+    data, _ := json.Marshal(pr)
+    db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
 
 	group := config.GetRepoGroupByName(b.cfg, repoGroup)
 	if group != nil {

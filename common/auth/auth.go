@@ -2,6 +2,7 @@ package auth
 
 import (
     "errors"
+    "sync"
     "time"
 
     "github.com/golang-jwt/jwt/v5"
@@ -11,6 +12,7 @@ import (
 var (
     jwtSecret   []byte
     tokenExpiry time.Duration
+    blacklistMu sync.RWMutex
     blacklist   = make(map[string]time.Time)
 )
 
@@ -71,7 +73,10 @@ func ValidateJWT(tokenString string) (jwt.MapClaims, error) {
     }
 
     // Check if token is blacklisted
-    if _, blacklisted := blacklist[tokenString]; blacklisted {
+    blacklistMu.RLock()
+    _, blacklisted := blacklist[tokenString]
+    blacklistMu.RUnlock()
+    if blacklisted {
         return nil, errors.New("token is blacklisted")
     }
 
@@ -80,12 +85,16 @@ func ValidateJWT(tokenString string) (jwt.MapClaims, error) {
 
 // BlacklistToken adds a token to the blacklist
 func BlacklistToken(tokenString string) {
+    blacklistMu.Lock()
     blacklist[tokenString] = time.Now()
+    blacklistMu.Unlock()
 }
 
 // CleanupBlacklist removes expired tokens from blacklist
 func CleanupBlacklist() {
     now := time.Now()
+    blacklistMu.Lock()
+    defer blacklistMu.Unlock()
     for token, addedAt := range blacklist {
         // Remove tokens older than 2x expiry time
         if now.Sub(addedAt) > tokenExpiry*2 {

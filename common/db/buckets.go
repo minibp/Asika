@@ -9,4 +9,6 @@ const (
     BucketQueueItems   = "queue_items"
     BucketUsers        = "users"
     BucketSyncHistory  = "sync_history"
+    BucketPRIndexByID  = "pr_index_by_id"
+    BucketPRIndexByRG  = "pr_index_by_rg_num"
 )

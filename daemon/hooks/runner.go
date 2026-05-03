@@ -6,6 +6,7 @@ import (
     "os/exec"
     "path/filepath"
     "log/slog"
+    "strings"
     "time"
 )
 
@@ -24,6 +25,11 @@ func NewRunner(hookPath string) *Runner {
 // Run executes a hook script
 func (r *Runner) Run(hookName, gitDir, oldRev, newRev, refName string) error {
     if r.hookPath == "" {
+        return nil
+    }
+
+    if !isValidHookName(hookName) {
+        slog.Warn("invalid hook name, skipping", "hook", hookName)
         return nil
     }
 
@@ -58,4 +64,19 @@ func (r *Runner) Run(hookName, gitDir, oldRev, newRev, refName string) error {
     }
 
     return nil
+}
+
+func isValidHookName(name string) bool {
+    if name == "" {
+        return false
+    }
+    if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+        return false
+    }
+    for _, c := range name {
+        if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+            return false
+        }
+    }
+    return true
 }

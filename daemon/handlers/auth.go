@@ -1,16 +1,17 @@
 package handlers
 
 import (
-	"encoding/json"
-	"net/http"
+    "encoding/json"
+    "net/http"
+    "strings"
 
-	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/bcrypt"
+    "github.com/gin-gonic/gin"
+    "golang.org/x/crypto/bcrypt"
 
-	"asika/common/auth"
-	"asika/common/config"
-	"asika/common/db"
-	"asika/common/models"
+    "asika/common/auth"
+    "asika/common/config"
+    "asika/common/db"
+    "asika/common/models"
 )
 
 // Login handles POST /api/v1/auth/login (8.1)
@@ -67,8 +68,27 @@ func Login(c *gin.Context) {
 
 // Logout handles POST /api/v1/auth/logout (8.1)
 func Logout(c *gin.Context) {
-	// In a full implementation, add token to blacklist
-	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+    token := extractLogoutToken(c)
+    if token != "" {
+        auth.BlacklistToken(token)
+    }
+    c.SetCookie("asika_token", "", -1, "/", "", false, true)
+    c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+}
+
+func extractLogoutToken(c *gin.Context) string {
+    if token, err := c.Cookie("asika_token"); err == nil && token != "" {
+        return token
+    }
+    authHeader := c.GetHeader("Authorization")
+    if authHeader == "" {
+        return ""
+    }
+    parts := strings.SplitN(authHeader, " ", 2)
+    if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+        return ""
+    }
+    return parts[1]
 }
 
 // ListUsers handles GET /api/v1/users (8.1)
@@ -108,9 +128,15 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 
-	if req.Role == "" {
-		req.Role = "viewer"
-	}
+if req.Role == "" {
+        req.Role = "viewer"
+    }
+
+    validRoles := map[string]bool{"viewer": true, "operator": true, "admin": true}
+    if !validRoles[req.Role] {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role: must be viewer, operator, or admin"})
+        return
+    }
 
 	// Hash password
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)

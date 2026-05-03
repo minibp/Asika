@@ -107,6 +107,22 @@
 
 {{define "scripts"}}
 <script>
+    var escapeHtml = (function() {
+        var entityMap = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+            '/': '&#x2F;'
+        };
+        return function(str) {
+            if (str == null) return '';
+            return String(str).replace(/[&<>"'\/]/g, function(s) {
+                return entityMap[s];
+            });
+        };
+    })();
     function apiRequest(url, options) {
         const token = localStorage.getItem('token');
         return fetch(url, {

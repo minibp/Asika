@@ -64,8 +64,8 @@ act.innerHTML = '<p style="color:#666">No recent activity</p>';
                 } else {
                     act.innerHTML = logs.slice(0, 10).map(l =>
                         '<div class="activity-item">' +
-                        '<span class="activity-time">' + l.timestamp + '</span> ' +
-                        '<span class="activity-msg">' + l.message + '</span>' +
+                        '<span class="activity-time">' + escapeHtml(l.timestamp) + '</span> ' +
+                        '<span class="activity-msg">' + escapeHtml(l.message) + '</span>' +
                         '</div>'
                     ).join('');
                 }

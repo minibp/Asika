@@ -16,7 +16,7 @@ import (
 )
 
 var (
-    current atomic.Value
+    current    atomic.Value
     ConfigPath string
 )
 
@@ -146,7 +146,7 @@ func validate(cfg *models.Config) error {
 
 // GetRepoGroups returns all repo groups
 func GetRepoGroups(cfg *models.Config) []models.RepoGroup {
-	groups := make([]models.RepoGroup, len(cfg.RepoGroups))
+    groups := make([]models.RepoGroup, len(cfg.RepoGroups))
 	for i, rg := range cfg.RepoGroups {
 		mode := rg.Mode
 		if mode == "" {
@@ -170,10 +170,25 @@ func GetRepoGroups(cfg *models.Config) []models.RepoGroup {
 
 // GetRepoGroupByName finds a repo group by name
 func GetRepoGroupByName(cfg *models.Config, name string) *models.RepoGroup {
-    groups := GetRepoGroups(cfg)
-    for _, g := range groups {
-        if g.Name == name {
-            return &g
+    for i := range cfg.RepoGroups {
+        rg := &cfg.RepoGroups[i]
+        mode := rg.Mode
+        if mode == "" {
+            mode = "multi"
+        }
+        if rg.Name == name {
+            return &models.RepoGroup{
+                Name:           rg.Name,
+                Mode:           mode,
+                MirrorPlatform: rg.MirrorPlatform,
+                GitHub:         rg.GitHub,
+                GitLab:         rg.GitLab,
+                Gitea:          rg.Gitea,
+                DefaultBranch:  rg.DefaultBranch,
+                HookPath:       rg.HookPath,
+                CIProvider:     rg.CIProvider,
+                MergeQueue:     rg.MergeQueue,
+            }
         }
     }
     return nil

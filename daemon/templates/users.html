@@ -64,10 +64,10 @@
             const users = await resp.json();
             if (users.length === 0) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">No users found</td></tr>'; return; }
             tbody.innerHTML = users.map(u =>
-                '<tr><td>' + u.username + '</td>' +
-                '<td>' + u.role + '</td>' +
-                '<td>' + (u.created_at ? u.created_at.substring(0,10) : '-') + '</td>' +
-                '<td><button class="btn btn-danger" onclick="deleteUser(\'' + u.username + '\')" style="padding:4px 8px;font-size:12px;">Delete</button></td></tr>'
+                '<tr><td>' + escapeHtml(u.username) + '</td>' +
+                '<td>' + escapeHtml(u.role) + '</td>' +
+                '<td>' + (u.created_at ? escapeHtml(u.created_at.substring(0,10)) : '-') + '</td>' +
+                '<td><button class="btn btn-danger" data-username="' + escapeHtml(u.username) + '" onclick="deleteUser(this.dataset.username)" style="padding:4px 8px;font-size:12px;">Delete</button></td></tr>'
             ).join('');
         } catch(e) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">No users found</td></tr>'; }
     }

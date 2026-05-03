@@ -150,24 +150,33 @@ func (m *Manager) merge(item *models.QueueItem) error {
 
 // findPRByID finds a PR by its ID in bbolt
 func findPRByID(prID string) (*models.PRRecord, error) {
-	var pr *models.PRRecord
-	err := db.ForEach(db.BucketPRs, func(key, value []byte) error {
-		var record models.PRRecord
-		if err := json.Unmarshal(value, &record); err != nil {
-			return err
-		}
-		if record.ID == prID {
-			pr = &record
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if pr == nil {
-		return nil, fmt.Errorf("PR not found: %s", prID)
-	}
-	return pr, nil
+    data, err := db.GetPRByIndex(prID, "", 0)
+    if err != nil || data == nil {
+        var pr *models.PRRecord
+        err := db.ForEach(db.BucketPRs, func(key, value []byte) error {
+            var record models.PRRecord
+            if err := json.Unmarshal(value, &record); err != nil {
+                return err
+            }
+            if record.ID == prID {
+                pr = &record
+            }
+            return nil
+        })
+        if err != nil {
+            return nil, err
+        }
+        if pr == nil {
+            return nil, fmt.Errorf("PR not found: %s", prID)
+        }
+        return pr, nil
+    }
+
+    var pr models.PRRecord
+    if err := json.Unmarshal(data, &pr); err != nil {
+        return nil, err
+    }
+    return &pr, nil
 }
 
 // GetQueueItems returns all queue items for a repo group

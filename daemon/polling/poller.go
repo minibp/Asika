@@ -1,17 +1,19 @@
 package polling
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"log/slog"
-	"strings"
-	"time"
+    "context"
+    "encoding/json"
+    "fmt"
+    "log/slog"
+    "strings"
+    "time"
 
-	"asika/common/db"
-	"asika/common/events"
-	"asika/common/models"
-	"asika/common/platforms"
+    "github.com/google/uuid"
+
+    "asika/common/db"
+    "asika/common/events"
+    "asika/common/models"
+    "asika/common/platforms"
 )
 
 // Poller polls platforms for PR changes
@@ -134,9 +136,12 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 			}
 		}
 
-		// Store/update in DB
-		prData, _ := json.Marshal(pr)
-		db.Put(db.BucketPRs, key, prData)
+// Store/update in DB
+        if pr.ID == "" {
+            pr.ID = uuid.New().String()
+        }
+        prData, _ := json.Marshal(pr)
+        db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
 	}
 }
 

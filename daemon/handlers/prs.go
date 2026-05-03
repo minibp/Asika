@@ -94,18 +94,39 @@ func GetPR(c *gin.Context) {
 		return
 	}
 
-	// Try to find PR in DB by scanning for matching ID or PR number
-	var found *models.PRRecord
-	db.ForEach(db.BucketPRs, func(key, value []byte) error {
-		var pr models.PRRecord
-		if json.Unmarshal(value, &pr) != nil {
-			return nil
-		}
-		if pr.RepoGroup == repoGroup && (pr.ID == prID || fmt.Sprintf("%d", pr.PRNumber) == prID) {
-			found = &pr
-		}
-		return nil
-	})
+// Try to find PR in DB using index or scan
+    var found *models.PRRecord
+    prNumber, convErr := strconv.Atoi(prID)
+    if convErr == nil {
+        data, err := db.GetPRByIndex("", repoGroup, prNumber)
+        if err == nil && data != nil {
+            var pr models.PRRecord
+            if json.Unmarshal(data, &pr) == nil && pr.RepoGroup == repoGroup {
+                found = &pr
+            }
+        }
+    }
+    if found == nil {
+        data, err := db.GetPRByIndex(prID, "", 0)
+        if err == nil && data != nil {
+            var pr models.PRRecord
+            if json.Unmarshal(data, &pr) == nil && pr.RepoGroup == repoGroup {
+                found = &pr
+            }
+        }
+    }
+    if found == nil {
+        db.ForEach(db.BucketPRs, func(key, value []byte) error {
+            var pr models.PRRecord
+            if json.Unmarshal(value, &pr) != nil {
+                return nil
+            }
+            if pr.RepoGroup == repoGroup && (pr.ID == prID || fmt.Sprintf("%d", pr.PRNumber) == prID) {
+                found = &pr
+            }
+            return nil
+        })
+    }
 
 	if found != nil {
 		c.JSON(http.StatusOK, found)
@@ -336,8 +357,8 @@ func MarkSpam(c *gin.Context) {
 	// Update PR record to mark as spam
 	pr.State = "spam"
 	pr.SpamFlag = true
-	updated, _ := json.Marshal(pr)
-	db.Put(db.BucketPRs, key, updated)
+updated, _ := json.Marshal(pr)
+    db.PutPRWithIndex(key, updated, pr.ID, repoGroup, pr.PRNumber)
 
 	// TODO: Send notifications to admins
 

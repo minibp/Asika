@@ -1,24 +1,27 @@
 package handlers
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
-	"io"
-	"log/slog"
-	"net/http"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
+    "context"
+    "crypto/sha256"
+    "encoding/hex"
+    "fmt"
+    "io"
+    "log/slog"
+    "net/http"
+    "os"
+    "path/filepath"
+    "runtime"
+    "strings"
+    "time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/go-github/v69/github"
+    "github.com/gin-gonic/gin"
+    "github.com/google/go-github/v69/github"
 
-	"asika/common/config"
-	"asika/common/version"
+    "asika/common/config"
+    "asika/common/version"
 )
+
+var httpUpdateClient = &http.Client{Timeout: 60 * time.Second}
 
 const githubOwner = "AsikaProject"
 const githubRepo = "asika"
@@ -120,8 +123,8 @@ func PerformWebUpdate(c *gin.Context) {
 	if checksumURL != "" {
 		sendEvent("progress", `{"status":"verifying","progress":100,"message":"Verifying checksum..."}`)
 
-		checksumPath := filepath.Join(tmpDir, "checksums.txt")
-		resp, err := http.Get(checksumURL)
+checksumPath := filepath.Join(tmpDir, "checksums.txt")
+        resp, err := httpUpdateClient.Get(checksumURL)
 		if err != nil {
 			sendEvent("error", fmt.Sprintf(`{"error":"failed to download checksums: %s"}`, err.Error()))
 			return
@@ -161,12 +164,23 @@ func PerformWebUpdate(c *gin.Context) {
 		return
 	}
 
-	in, _ := os.Open(binaryPath)
-	out, _ := os.Create(currentPath)
-	io.Copy(out, in)
-	in.Close()
-	out.Close()
-	os.Chmod(currentPath, 0755)
+in, err := os.Open(binaryPath)
+    if err != nil {
+        sendEvent("error", fmt.Sprintf(`{"error":"failed to open downloaded binary: %s"}`, err.Error()))
+        return
+    }
+    out, err := os.Create(currentPath)
+    if err != nil {
+        in.Close()
+        // Restore backup
+        os.Rename(backupPath, currentPath)
+        sendEvent("error", fmt.Sprintf(`{"error":"failed to create target binary: %s"}`, err.Error()))
+        return
+    }
+    io.Copy(out, in)
+    in.Close()
+    out.Close()
+    os.Chmod(currentPath, 0755)
 
 	slog.Info("self-update", "version", release.GetTagName(), "from", "webui")
 	sendEvent("done", `{"status":"done","progress":100,"message":"Update complete. Service restarting..."}`)
@@ -177,7 +191,7 @@ func PerformWebUpdate(c *gin.Context) {
 }
 
 func downloadWithProgress(url, dest string, sendEvent func(string, string)) error {
-	resp, err := http.Get(url)
+    resp, err := httpUpdateClient.Get(url)
 	if err != nil {
 		return err
 	}
