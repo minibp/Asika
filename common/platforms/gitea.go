@@ -185,7 +185,10 @@ func (c *GiteaClient) CommentPR(ctx context.Context, owner, repo string, number 
 }
 
 // AddLabel adds a label to a pull request
-func (c *GiteaClient) AddLabel(ctx context.Context, owner, repo string, number int, label string) error {
+func (c *GiteaClient) AddLabel(ctx context.Context, owner, repo string, number int, label string, color string) error {
+	if color == "" {
+		color = "#ededed"
+	}
 	// Find or create the label first
 	labels, _, err := c.client.ListRepoLabels(owner, repo, gitea.ListLabelsOptions{})
 	if err != nil {
@@ -204,7 +207,7 @@ func (c *GiteaClient) AddLabel(ctx context.Context, owner, repo string, number i
 		// Create the label
 		newLabel, _, err := c.client.CreateLabel(owner, repo, gitea.CreateLabelOption{
 			Name:  label,
-			Color: "#ededed",
+			Color: color,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create label: %w", err)

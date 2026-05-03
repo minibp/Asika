@@ -25,7 +25,7 @@ type PlatformClient interface {
     ClosePR(ctx context.Context, owner, repo string, number int) error
     ReopenPR(ctx context.Context, owner, repo string, number int) error
     CommentPR(ctx context.Context, owner, repo string, number int, body string) error
-    AddLabel(ctx context.Context, owner, repo string, number int, label string) error
+    AddLabel(ctx context.Context, owner, repo string, number int, label string, color string) error
     RemoveLabel(ctx context.Context, owner, repo string, number int, label string) error
     CreateLabel(ctx context.Context, owner, repo, name, color, description string) error
 

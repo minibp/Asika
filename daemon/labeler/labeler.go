@@ -92,7 +92,11 @@ func (l *Labeler) ApplyRules(pr *models.PRRecord, repoGroup string, files []stri
 	for _, rule := range rules {
 		if matchPattern(rule.Pattern, files) {
 			slog.Info("adding label", "label", rule.Label, "pr", pr.PRNumber, "pattern", rule.Pattern)
-			if err := client.AddLabel(ctx, owner, repo, pr.PRNumber, rule.Label); err != nil {
+			color := rule.Color
+			if color == "" {
+				color = "ededed"
+			}
+			if err := client.AddLabel(ctx, owner, repo, pr.PRNumber, rule.Label, color); err != nil {
 				slog.Error("failed to add label", "error", err, "label", rule.Label)
 			}
 		}

@@ -73,9 +73,9 @@ func (m *MockPlatformClient) CommentPR(ctx context.Context, owner, repo string, 
     return m.Err
 }
 
-func (m *MockPlatformClient) AddLabel(ctx context.Context, owner, repo string, number int, label string) error {
+func (m *MockPlatformClient) AddLabel(ctx context.Context, owner, repo string, number int, label string, color string) error {
 	m.AppliedLabels = append(m.AppliedLabels, label)
-	return m.Err
+	return nil
 }
 
 func (m *MockPlatformClient) RemoveLabel(ctx context.Context, owner, repo string, number int, label string) error {

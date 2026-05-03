@@ -240,7 +240,7 @@ func (m *Manager) markStale(client platforms.PlatformClient, group *models.RepoG
 		slog.Warn("stale: failed to ensure label exists", "label", labelBase, "error", err)
 	}
 
-	if err := client.AddLabel(ctx, owner, repo, pr.PRNumber, labelBase); err != nil {
+	if err := client.AddLabel(ctx, owner, repo, pr.PRNumber, labelBase, "cccccc"); err != nil {
 		slog.Error("stale: failed to add label", "pr", pr.PRNumber, "error", err)
 		return
 	}

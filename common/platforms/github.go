@@ -166,7 +166,13 @@ func (c *GitHubClient) CommentPR(ctx context.Context, owner, repo string, number
 }
 
 // AddLabel adds a label to a pull request
-func (c *GitHubClient) AddLabel(ctx context.Context, owner, repo string, number int, label string) error {
+func (c *GitHubClient) AddLabel(ctx context.Context, owner, repo string, number int, label string, color string) error {
+	if color == "" {
+		color = "ededed"
+	}
+	if err := c.CreateLabel(ctx, owner, repo, label, color, ""); err != nil {
+		return err
+	}
 	_, _, err := c.client.Issues.AddLabelsToIssue(ctx, owner, repo, number, []string{label})
 	if err != nil {
 		return fmt.Errorf("failed to add label: %w", err)

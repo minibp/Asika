@@ -240,8 +240,14 @@ func (c *GitLabClient) CommentPR(ctx context.Context, owner, repo string, number
 }
 
 // AddLabel adds a label to a merge request
-func (c *GitLabClient) AddLabel(ctx context.Context, owner, repo string, number int, label string) error {
+func (c *GitLabClient) AddLabel(ctx context.Context, owner, repo string, number int, label string, color string) error {
 	project := owner + "/" + repo
+	if color == "" {
+		color = "#ededed"
+	}
+	if err := c.CreateLabel(ctx, owner, repo, label, color, ""); err != nil {
+		return err
+	}
 	mr, _, err := c.client.MergeRequests.GetMergeRequest(project, int64(number), nil)
 	if err != nil {
 		return fmt.Errorf("failed to get MR: %w", err)

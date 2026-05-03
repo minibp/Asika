@@ -72,14 +72,18 @@ config = { host = "smtp.example.com", port = 587, username = "bot@example.com", 
 [[label_rules]]
 pattern = "**/*.go"
 label   = "go"
+color   = "#00ADD8"
+description = "Go source files"
 
 [[label_rules]]
 pattern = "**/*.js"
 label   = "javascript"
+color   = "#F7DF1E"
 
 [[label_rules]]
 pattern = "docs/**"
 label   = "documentation"
+color   = "#008672"
 
 # Repo groups (multi mode)
 [[repo_groups]]

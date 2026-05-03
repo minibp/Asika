@@ -101,8 +101,10 @@ type MergeQueueConfig struct {
 
 // LabelRule represents a label rule
 type LabelRule struct {
-    Pattern string `json:"pattern" toml:"pattern"`
-    Label   string `json:"label" toml:"label"`
+    Pattern     string `json:"pattern" toml:"pattern"`
+    Label       string `json:"label" toml:"label"`
+    Color       string `json:"color" toml:"color"`
+    Description string `json:"description" toml:"description"`
 }
 
 // SpamConfig represents spam detection configuration
