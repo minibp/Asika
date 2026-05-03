@@ -208,6 +208,7 @@ jobs:
         env:
           TAG_NAME: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKER_IMAGE_NAME: asikaproject/asika
 
   release:
     needs: [build, package-deb, package-dmg, package-nsis, package-docker]
