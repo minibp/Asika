@@ -23,25 +23,18 @@ jobs:
         with:
           go-version: '1.25.0'
 
+      - name: Checkout pack
+        uses: actions/checkout@v4
+        with:
+          repository: AsikaProject/pack
+          path: pack
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build binaries
-        run: |
-          PLATFORMS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
-          VERSION="${{ github.ref_name }}"
-          for platform in $PLATFORMS; do
-            GOOS=${platform%/*}
-            GOARCH=${platform#*/}
-            for binary in asika asikad; do
-              mkdir -p bin
-              GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w -X 'asika/common/version.Version=${VERSION}'" \
-                -o bin/${binary}-${GOOS}-${GOARCH} ./cmd/${binary}
-            done
-          done
-          # Create tar.gz for each binary
-          cd bin
-          for f in *; do
-            tar -czf ${f}.tar.gz $f
-          done
-          cd ..
+        run: bash pack/scripts/build-binaries.sh
+        env:
+          GO_VERSION: '1.25.0'
+          TAG_NAME: ${{ github.ref_name }}
 
       - name: Get version
         id: version
