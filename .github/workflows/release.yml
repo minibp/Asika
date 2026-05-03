@@ -26,12 +26,13 @@ jobs:
       - name: Build binaries
         run: |
           PLATFORMS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
+          VERSION="${{ github.ref_name }}"
           for platform in $PLATFORMS; do
             GOOS=${platform%/*}
             GOARCH=${platform#*/}
             for binary in asika asikad; do
               mkdir -p bin
-              GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w" \
+              GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w -X 'asika/common/version.Version=${VERSION}'" \
                 -o bin/${binary}-${GOOS}-${GOARCH} ./cmd/${binary}
             done
           done
