@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -eu
+
 error() {
 	echo "Error: $1" >&2
 	exit 1
@@ -13,9 +15,31 @@ SU() {
 	fi
 }
 
+# Generate version: YYYYMMDD[SUFFIX]
+# Suffixes: HF (hotfix), CVE (security), DEV (beta), DEP (dependency update)
+gen_version() {
+	local suffix="${1:-DEV}"
+	local date
+	date=$(date +%Y%m%d)
+	echo "${date}${suffix}"
+}
+
+# Build with strip (default)
 build() {
-	env go build -o asikad ./cmd/asikad/main.go
-	env go build -o asika ./cmd/asika/main.go
+	local version
+	version=$(gen_version)
+	local ldflags="-s -w -X 'asika/common/version.Version=${version}'"
+	echo "Building with version: ${version} (stripped)"
+	env go build -ldflags="${ldflags}" -o asikad ./cmd/asikad/main.go
+	env go build -ldflags="${ldflags}" -o asika ./cmd/asika/main.go
+	strip asika
+	strip asikad
+}
+
+# Download dependencies
+dep() {
+	echo "Downloading dependencies..."
+	go mod download
 }
 
 clean() {
@@ -28,4 +52,21 @@ distclean() {
 	SU rm -rf ~/go
 }
 
-build
+# Parse command line arguments
+case "${1:-build}" in
+	build)
+		build
+		;;
+	dep)
+		dep
+		;;
+	clean)
+		clean
+		;;
+	distclean)
+		distclean
+		;;
+	*)
+		error "Unknown command: $1 (use: build, dep, clean, distclean)"
+		;;
+esac

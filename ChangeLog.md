@@ -1,3 +1,5 @@
+# ChangeLog for Asika
+
 ## v20260504DEV
 - Fix self-update endpoint returning 500 error (github.NewClient(nil) fixed with proper auth)
 - Add webhook retry mechanism with exponential backoff (max 10 attempts)
