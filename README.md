@@ -115,52 +115,6 @@ config                → Show config
 help                  → All commands
 ```
 
-## New Features (v20260504DEV)
-
-### 🔹 PR Comments
-Comment on PRs directly via CLI or API:
-```bash
-asika pr comment my-project 42 "LGTM! Ready to merge."
-```
-API: `POST /api/v1/repos/:repo_group/prs/:pr_id/comment`
-
-### 🔹 Draft PR Detection
-Draft PRs (GitHub) and WIP PRs (GitLab) are automatically detected and skipped in the merge queue. Filter by draft status:
-```bash
-asika pr list my-project --state open  # Add ?is_draft=true/false in API
-```
-
-### 🔹 Conflict Detection
-PRs with merge conflicts are automatically detected and skipped in the merge queue.
-
-### 🔹 Batch Operations
-Manage multiple PRs at once:
-```bash
-asika pr batch-approve my-project 42,43,44
-asika pr batch-close my-project 42,43 --label "wontfix"
-```
-
-### 🔹 Enhanced Search & Filtering
-List PRs with advanced filters:
-```bash
-# Filter by author, label, date
-asika pr list my-project --author "username" --label "bug"
-
-# API supports: ?author=, ?label=, ?created_after=, ?updated_after=
-# Pagination: ?page=1&per_page=20
-```
-
-### 🔹 Audit Logging
-Track all PR operations with built-in audit logs:
-```bash
-# API: GET /api/v1/logs?level=info|warn|error
-```
-
-### 🔹 Webhook Retry
-Failed webhooks are automatically retried with exponential backoff (max 10 attempts).
-
----
-
 ## CLI Cheatsheet
 All commands need a token: `asika --token <token>` or set `ASIKA_TOKEN`.
 

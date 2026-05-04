@@ -1,5 +1,5 @@
 ## v20260504DEV
-- Fix self-update endpoint returning 500 error (github.NewClient(nil) fixed with proper auth
+- Fix self-update endpoint returning 500 error (github.NewClient(nil) fixed with proper auth)
 - Add webhook retry mechanism with exponential backoff (max 10 attempts)
 - Add audit logging system with API endpoint GET /api/v1/logs
 - Add PR comment support (API + CLI: asika pr comment)
@@ -12,6 +12,8 @@
 - Add Gitea @ mention notification support (gitea_at)
 - Register gitea_at and discord notification types in config and handlers
 - Update asika.toml.example with Discord and Gitea @ notification config
+- Improve error handling: return 502 when platform client unavailable instead of silent empty response
+- Add fallback to 'default' repo group when requested group not found
 
 ## v20260503DEV
 - Inital commit
