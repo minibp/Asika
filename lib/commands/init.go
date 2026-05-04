@@ -13,209 +13,298 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// initCmd runs the init wizard and sends config to server
-var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Run configuration wizard (sends to server)",
+var wizardCmd = &cobra.Command{
+	Use:   "wizard",
+	Short: "Run configuration wizard and apply to server",
+	Long: `Run an interactive configuration wizard that connects to an asikad server,
+steps through all configuration options, writes the config file on the server,
+and creates the admin user in the database.
+
+You can also provide an existing TOML config file via --file and only enter
+the admin credentials interactively.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		reader := bufio.NewReader(os.Stdin)
-
-		fmt.Println("=== Asika Configuration Wizard ===")
-		fmt.Println()
-
-		// Server config
-		fmt.Print("Server listen address [':8080']: ")
-		listen, _ := reader.ReadString('\n')
-		listen = strings.TrimSpace(listen)
-		if listen == "" {
-			listen = ":8080"
-		}
-
-		fmt.Print("Server mode (debug/release) ['release']: ")
-		mode, _ := reader.ReadString('\n')
-		mode = strings.TrimSpace(mode)
-		if mode == "" {
-			mode = "release"
-		}
-
-		// Database
-		fmt.Print("Database path ['/var/lib/asika/asika.db']: ")
-		dbPath, _ := reader.ReadString('\n')
-		dbPath = strings.TrimSpace(dbPath)
-		if dbPath == "" {
-			dbPath = "/var/lib/asika/asika.db"
-		}
-
-		// Auth
-		fmt.Print("JWT secret (leave empty to generate): ")
-		jwtSecret, _ := reader.ReadString('\n')
-		jwtSecret = strings.TrimSpace(jwtSecret)
-
-		fmt.Print("Token expiry ['72h']: ")
-		tokenExpiry, _ := reader.ReadString('\n')
-		tokenExpiry = strings.TrimSpace(tokenExpiry)
-		if tokenExpiry == "" {
-			tokenExpiry = "72h"
-		}
-
-		// Mode
-		fmt.Print("Mode (single/multi) ['multi']: ")
-		repoMode, _ := reader.ReadString('\n')
-		repoMode = strings.TrimSpace(repoMode)
-		if repoMode == "" {
-			repoMode = "multi"
-		}
-
-		// Updates
-		fmt.Print("Enable automatic update check? (y/n) ['n']: ")
-		updateCheck, _ := reader.ReadString('\n')
-		updateCheck = strings.TrimSpace(updateCheck)
-		updateCheckEnabled := strings.ToLower(updateCheck) == "y" || strings.ToLower(updateCheck) == "yes"
-
-		updateInterval := "24h"
-		updateNotify := "n"
-		if updateCheckEnabled {
-			fmt.Print("Check interval ['24h']: ")
-			ui, _ := reader.ReadString('\n')
-			ui = strings.TrimSpace(ui)
-			if ui != "" {
-				updateInterval = ui
-			}
-			fmt.Print("Notify on new version? (y/n) ['n']: ")
-			updateNotify, _ = reader.ReadString('\n')
-			updateNotify = strings.TrimSpace(updateNotify)
-		}
-
-		updateCheckStr := "false"
-		if updateCheckEnabled {
-			updateCheckStr = "true"
-		}
-		updateNotifyStr := "false"
-		if strings.ToLower(updateNotify) == "y" || strings.ToLower(updateNotify) == "yes" {
-			updateNotifyStr = "true"
-		}
-
-		// Stale
-		fmt.Print("Enable stale PR management? (y/n) ['n']: ")
-		staleEnabled, _ := reader.ReadString('\n')
-		staleEnabled = strings.TrimSpace(staleEnabled)
-		staleEnabledBool := strings.ToLower(staleEnabled) == "y" || strings.ToLower(staleEnabled) == "yes"
-		staleEnabledStr := "false"
-		if staleEnabledBool {
-			staleEnabledStr = "true"
-		}
-
-		staleInterval := "6h"
-		if staleEnabledBool {
-			fmt.Print("Check interval ['6h']: ")
-			si, _ := reader.ReadString('\n')
-			si = strings.TrimSpace(si)
-			if si != "" {
-				staleInterval = si
-			}
-		}
-
-		// Generate config
-		configTOML := generateConfigForInit(listen, mode, dbPath, jwtSecret, tokenExpiry, repoMode, updateCheckStr, updateInterval, updateNotifyStr, staleEnabledStr, staleInterval)
-
-		// Send to server via HTTP
 		server := GetServer(cmd)
 
-		token := GetToken(cmd)
+		fmt.Printf("=== Asika Configuration Wizard ===\n")
+		fmt.Printf("Server: %s\n\n", server)
 
-		// Convert TOML to JSON for API
+		// Check if server is reachable
+		fmt.Print("Checking server connection... ")
+		if err := checkServer(server); err != nil {
+			fmt.Printf("FAILED\nError: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("OK")
+
+		// Check if already initialized
+		if initialized, err := checkInitialized(server); err == nil && initialized {
+			fmt.Println("Server is already initialized. Use 'asika login' to authenticate.")
+			return
+		}
+
 		var cfg map[string]interface{}
-		if err := toml.Unmarshal([]byte(configTOML), &cfg); err != nil {
-			fmt.Printf("Error parsing config: %v\n", err)
-			return
+
+		// Try loading from --file first
+		filePath, _ := cmd.Flags().GetString("file")
+		if filePath != "" {
+			fmt.Printf("Loading config from %s...\n", filePath)
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				fmt.Printf("Error reading file: %v\n", err)
+				os.Exit(1)
+			}
+			if err := toml.Unmarshal(data, &cfg); err != nil {
+				fmt.Printf("Error parsing TOML: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("Config loaded. Only admin credentials needed.\n")
+		} else {
+			cfg = runInteractiveWizard(reader)
 		}
 
-		jsonData, err := json.Marshal(cfg)
-		if err != nil {
-			fmt.Printf("Error converting config: %v\n", err)
-			return
+		// Admin account (always asked, not stored in TOML)
+		adminUser := prompt(reader, "Admin username", "admin")
+		adminPass := promptSecret(reader, "Admin password")
+		if adminPass == "" {
+			fmt.Println("Error: admin password cannot be empty")
+			os.Exit(1)
 		}
 
-		url := fmt.Sprintf("%s/api/v1/config", server)
-		req, err := http.NewRequest("PUT", url, bytes.NewBuffer(jsonData))
+		// Build payload matching wizardPayload struct
+		payload := map[string]interface{}{
+			"config": cfg,
+			"users": []map[string]interface{}{
+				{
+					"username": adminUser,
+					"password": adminPass,
+					"role":     "admin",
+				},
+			},
+		}
+
+		jsonData, err := json.Marshal(payload)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			return
+			fmt.Printf("Error encoding payload: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Print("\nApplying configuration to server... ")
+		url := fmt.Sprintf("%s/api/v1/wizard/step/complete", server)
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+		if err != nil {
+			fmt.Printf("FAILED\n%v\n", err)
+			os.Exit(1)
 		}
 		req.Header.Set("Content-Type", "application/json")
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			fmt.Printf("Error sending config to server: %v\n", err)
-			return
+			fmt.Printf("FAILED\n%v\n", err)
+			os.Exit(1)
 		}
 		defer resp.Body.Close()
 
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+
 		if resp.StatusCode != http.StatusOK {
-			fmt.Printf("Server returned error: HTTP %d\n", resp.StatusCode)
-			return
+			errMsg := "unknown error"
+			if e, ok := result["error"].(string); ok {
+				errMsg = e
+			}
+			fmt.Printf("FAILED\nServer error: %s\n", errMsg)
+			os.Exit(1)
 		}
 
-		fmt.Println("Configuration sent to server successfully!")
-		fmt.Println("The server will write the config file and reload.")
+		fmt.Println("OK")
+		fmt.Println("\n=== Setup Complete ===")
+		fmt.Println("You can now login with:")
+		fmt.Printf("  asika login -s %s\n", server)
 	},
 }
 
-func generateConfigForInit(listen, serverMode, dbPath, jwtSecret, tokenExpiry, repoMode, updateCheck, updateInterval, updateNotify, staleEnabled, staleInterval string) string {
-	if jwtSecret == "" {
-		jwtSecret = "change-me-in-init"
+func runInteractiveWizard(reader *bufio.Reader) map[string]interface{} {
+	cfg := make(map[string]interface{})
+
+	// Step 1: Mode Selection
+	fmt.Println("--- Step 1: Operation Mode ---")
+	mode := prompt(reader, "Mode (single/multi)", "multi")
+	cfg["mode"] = mode
+
+	// Step 2: Database
+	fmt.Println("\n--- Step 2: Database Configuration ---")
+	dbPath := prompt(reader, "Database path", "/var/lib/asika/asika.db")
+	cfg["database"] = map[string]string{"path": dbPath}
+
+	// Step 3: Platform Tokens
+	fmt.Println("\n--- Step 3: Platform Tokens ---")
+	githubToken := prompt(reader, "GitHub Token (leave empty to skip)", "")
+	gitlabToken := prompt(reader, "GitLab Token (leave empty to skip)", "")
+	giteaToken := prompt(reader, "Gitea Token (leave empty to skip)", "")
+	cfg["tokens"] = map[string]string{
+		"github": githubToken,
+		"gitlab": gitlabToken,
+		"gitea":  giteaToken,
 	}
 
-	return fmt.Sprintf(`# Asika Configuration
-# Generated by asika init
+	// Step 4: Repository Group
+	fmt.Println("\n--- Step 4: Repository Group ---")
+	groupName := prompt(reader, "Group name", "default")
+	defaultBranch := prompt(reader, "Default branch", "main")
+	githubRepo := prompt(reader, "GitHub Repository (owner/repo)", "")
+	gitlabRepo := prompt(reader, "GitLab Repository (owner/repo)", "")
+	giteaRepo := prompt(reader, "Gitea Repository (owner/repo)", "")
+	mirrorPlatform := ""
+	if mode == "single" {
+		mirrorPlatform = prompt(reader, "Mirror Platform (github/gitlab/gitea)", "github")
+	}
+	cfg["repo_groups"] = []map[string]interface{}{
+		{
+			"name":            groupName,
+			"mode":            mode,
+			"mirror_platform": mirrorPlatform,
+			"github":          githubRepo,
+			"gitlab":          gitlabRepo,
+			"gitea":           giteaRepo,
+			"default_branch":  defaultBranch,
+			"merge_queue": map[string]interface{}{
+				"required_approvals": 1,
+				"ci_check_required":  true,
+				"core_contributors":  []string{},
+			},
+		},
+	}
 
-[server]
-listen = "%s"
-mode   = "%s"
+	// Step 5: Notification Channels
+	fmt.Println("\n--- Step 5: Notification Channels ---")
+	notifyChannels := []map[string]interface{}{}
 
-[database]
-path = "%s"
+	tgToken := prompt(reader, "Telegram Bot Token (leave empty to skip)", "")
+	if tgToken != "" {
+		tgChatIDs := splitAndTrim(prompt(reader, "Telegram Chat IDs (comma-separated)", ""))
+		tgAdminIDs := splitAndTrim(prompt(reader, "Telegram Admin IDs (comma-separated)", ""))
+		notifyChannels = append(notifyChannels, map[string]interface{}{
+			"type":   "telegram",
+			"config": map[string]interface{}{},
+		})
+		_ = tgChatIDs
+		_ = tgAdminIDs
+	}
 
-[auth]
-jwt_secret = "%s"
-token_expiry = "%s"
+	smtpHost := prompt(reader, "SMTP Host (leave empty to skip)", "")
+	if smtpHost != "" {
+		smtpPort := prompt(reader, "SMTP Port", "587")
+		smtpUser := prompt(reader, "SMTP User", "")
+		smtpPass := promptSecret(reader, "SMTP Password")
+		smtpTo := splitAndTrim(prompt(reader, "SMTP Recipients (comma-separated)", ""))
+		notifyChannels = append(notifyChannels, map[string]interface{}{
+			"type": "smtp",
+			"config": map[string]interface{}{
+				"host":     smtpHost,
+				"port":     smtpPort,
+				"username": smtpUser,
+				"password": smtpPass,
+				"to":       smtpTo,
+			},
+		})
+	}
+	cfg["notify"] = notifyChannels
 
-[events]
-mode = "webhook"
+	// Step 6: Server & Auth
+	fmt.Println("\n--- Step 6: Server & Auth ---")
+	listen := prompt(reader, "Server listen address", ":8080")
+	serverMode := prompt(reader, "Server mode (debug/release)", "release")
+	jwtSecret := prompt(reader, "JWT Secret (leave empty to auto-generate)", "")
+	cfg["server"] = map[string]string{
+		"listen": listen,
+		"mode":   serverMode,
+	}
+	cfg["auth"] = map[string]string{
+		"jwt_secret":   jwtSecret,
+		"token_expiry": "72h",
+	}
 
-[git]
-workdir = "/var/lib/asika/work"
+	// Step 7: Self-Updates
+	fmt.Println("\n--- Step 7: Self-Update Settings ---")
+	updateCheck := prompt(reader, "Enable automatic update check? (y/n)", "n")
+	if strings.ToLower(updateCheck) == "y" || strings.ToLower(updateCheck) == "yes" {
+		updateInterval := prompt(reader, "Check interval", "24h")
+		updateNotify := prompt(reader, "Notify on new version? (y/n)", "n")
+		cfg["updates"] = map[string]interface{}{
+			"check":         true,
+			"interval":      updateInterval,
+			"notify_on_new": strings.ToLower(updateNotify) == "y" || strings.ToLower(updateNotify) == "yes",
+		}
+	} else {
+		cfg["updates"] = map[string]interface{}{
+			"check":         false,
+			"interval":      "24h",
+			"notify_on_new": false,
+		}
+	}
 
-[merge_queue]
-required_approvals = 1
+	return cfg
+}
 
-[spam]
-enabled = true
-time_window = "10m"
-threshold = 3
+func checkServer(server string) error {
+	resp, err := http.Get(fmt.Sprintf("%s/api/v1/config", server))
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
 
-[updates]
-check         = %s
-interval      = "%s"
-notify_on_new = %s
+func checkInitialized(server string) (bool, error) {
+	resp, err := http.Get(fmt.Sprintf("%s/api/v1/wizard", server))
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if resp.StatusCode == http.StatusBadRequest {
+		if errMsg, ok := result["error"].(string); ok && errMsg == "already initialized" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
-[stale]
-enabled        = %s
-check_interval = "%s"
-days_until_stale = 21
-days_until_close = 0
-stale_label    = "stale"
-exempt_labels  = ["long-term"]
+func prompt(reader *bufio.Reader, label, defaultVal string) string {
+	if defaultVal != "" {
+		fmt.Printf("%s [%s]: ", label, defaultVal)
+	} else {
+		fmt.Printf("%s: ", label)
+	}
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultVal
+	}
+	return input
+}
 
-[[repo_groups]]
-name = "default"
-mode = "%s"
-`, listen, serverMode, dbPath, jwtSecret, tokenExpiry, updateCheck, updateInterval, updateNotify, staleEnabled, staleInterval, repoMode)
+func promptSecret(reader *bufio.Reader, label string) string {
+	fmt.Printf("%s: ", label)
+	input, _ := reader.ReadString('\n')
+	return strings.TrimSpace(input)
+}
+
+func splitAndTrim(s string) []string {
+	parts := strings.Split(s, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 func init() {
-	RootCmd.AddCommand(initCmd)
+	wizardCmd.Flags().String("file", "", "Path to existing TOML config file (skip interactive config)")
+	RootCmd.AddCommand(wizardCmd)
 }
