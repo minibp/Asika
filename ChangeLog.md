@@ -1,6 +1,11 @@
 # ChangeLog for Asika
 
 ## v20260505DEV
+- Fix PR list not showing all PRs by default (per_page 20 -> 100, default filter to All)
+- Fix PR list ordering: sort by PR number descending (newest first)
+- Fix merged PRs incorrectly stored as closed (detect via MergedAt instead of MergeCommitSHA)
+- Add MergedAt field to PRRecord model for GitHub/GitLab/Gitea
+- Add migration to fix historical closed PRs that were actually merged
 - Fix webui wizard not complete normally
 - Fix cli not show pr issue
 - Add database sync step while starting Asika daemon

@@ -113,6 +113,11 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 		pr.RepoGroup = repoGroup
 		pr.Platform = platform
 
+		// GitHub API returns merged PRs as "closed"; detect via MergedAt
+		if pr.State == "closed" && !pr.MergedAt.IsZero() {
+			pr.State = "merged"
+		}
+
 		// Check if PR exists in DB
 		key := fmt.Sprintf("%s#%s#%d", repoGroup, platform, pr.PRNumber)
 		data, _ := db.Get(db.BucketPRs, key)
@@ -141,12 +146,12 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 			}
 		}
 
-// Store/update in DB
-        if pr.ID == "" {
-            pr.ID = uuid.New().String()
-        }
-        prData, _ := json.Marshal(pr)
-        db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+		// Store/update in DB
+		if pr.ID == "" {
+			pr.ID = uuid.New().String()
+		}
+		prData, _ := json.Marshal(pr)
+		db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
 	}
 }
 

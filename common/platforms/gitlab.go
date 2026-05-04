@@ -110,23 +110,29 @@ func gitLabMRToRecord(mr *gitlab.MergeRequest) *models.PRRecord {
 		updatedAt = *mr.UpdatedAt
 	}
 
-	return &models.PRRecord{
-		ID:             fmt.Sprintf("%d", mr.ID),
-		Platform:       "gitlab",
-		PRNumber:       int(mr.IID),
-		Title:          mr.Title,
-		Author:         author,
-		State:          gitLabState(mr.State),
-		Labels:         labels,
-		MergeCommitSHA: mr.MergeCommitSHA,
-		SpamFlag:       false,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		Events:         []models.PREvent{},
-		IsDraft:        mr.WorkInProgress,
-		HasConflict:    false, // TODO: implement merge status check for GitLab
-		HTMLURL:        mr.WebURL,
-	}
+	var mergedAt time.Time
+ 	if mr.MergedAt != nil {
+ 		mergedAt = *mr.MergedAt
+ 	}
+
+ 	return &models.PRRecord{
+ 		ID:             fmt.Sprintf("%d", mr.ID),
+ 		Platform:       "gitlab",
+ 		PRNumber:       int(mr.IID),
+ 		Title:          mr.Title,
+ 		Author:         author,
+ 		State:          gitLabState(mr.State),
+ 		Labels:         labels,
+ 		MergeCommitSHA: mr.MergeCommitSHA,
+ 		SpamFlag:       false,
+ 		CreatedAt:      createdAt,
+ 		UpdatedAt:      updatedAt,
+ 		Events:         []models.PREvent{},
+ 		IsDraft:        mr.WorkInProgress,
+ 		HasConflict:    false, // TODO: implement merge status check for GitLab
+ 		HTMLURL:        mr.WebURL,
+ 		MergedAt:       mergedAt,
+ 	}
 }
 
 func gitLabBasicMRToRecord(mr *gitlab.BasicMergeRequest) *models.PRRecord {

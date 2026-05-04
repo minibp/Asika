@@ -44,6 +44,7 @@ type PRRecord struct {
 	HasConflict    bool      `json:"has_conflict"` // true if PR has merge conflicts
 	IsApproved     bool      `json:"is_approved"` // true if PR has been approved by at least one reviewer
 	HTMLURL        string    `json:"html_url"`    // URL to the PR on the platform
+	MergedAt       time.Time `json:"merged_at"`   // when the PR was merged (zero if not merged)
 }
 
 // PREvent represents a pull request event

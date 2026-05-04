@@ -52,6 +52,14 @@ distclean() {
 	SU rm -rf ~/go
 }
 
+serve() {
+	sudo nohup ./asikad > asikad.log 2>&1 & echo ok
+}
+
+stop() {
+	sudo killall asikad
+}
+
 # Parse command line arguments
 case "${1:-build}" in
 	build)
@@ -65,6 +73,12 @@ case "${1:-build}" in
 		;;
 	distclean)
 		distclean
+		;;
+	serve)
+		serve
+		;;
+	stop)
+		stop
 		;;
 	*)
 		error "Unknown command: $1 (use: build, dep, clean, distclean)"

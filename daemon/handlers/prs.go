@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -109,9 +110,14 @@ func ListPRs(c *gin.Context) {
 		return nil
 	})
 
+	// Sort by PR number descending (newest first)
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].PRNumber > records[j].PRNumber
+	})
+
 	// Pagination
 	page := 1
-	perPage := 20
+	perPage := 100
 	if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
 		page = p
 	}

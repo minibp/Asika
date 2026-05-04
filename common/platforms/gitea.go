@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"code.gitea.io/sdk/gitea"
 
@@ -92,22 +93,28 @@ func giteaPRToRecord(pr *gitea.PullRequest) *models.PRRecord {
 		mergeCommitSHA = *pr.MergedCommitID
 	}
 
-	return &models.PRRecord{
-		ID:             fmt.Sprintf("%d", pr.ID),
-		Platform:       "gitea",
-		PRNumber:       int(pr.Index),
-		Title:          pr.Title,
-		Author:         pr.Poster.UserName,
-		State:          state,
-		Labels:         extractGiteaLabels(pr.Labels),
-		MergeCommitSHA: mergeCommitSHA,
-		SpamFlag:       false,
-		CreatedAt:      *pr.Created,
-		UpdatedAt:      *pr.Updated,
-		Events:         []models.PREvent{},
-		HasConflict:    !pr.Mergeable,
-		HTMLURL:        pr.HTMLURL,
-	}
+ 	var mergedAt time.Time
+ 	if pr.Merged != nil {
+ 		mergedAt = *pr.Merged
+ 	}
+
+ 	return &models.PRRecord{
+ 		ID:             fmt.Sprintf("%d", pr.ID),
+ 		Platform:       "gitea",
+ 		PRNumber:       int(pr.Index),
+ 		Title:          pr.Title,
+ 		Author:         pr.Poster.UserName,
+ 		State:          state,
+ 		Labels:         extractGiteaLabels(pr.Labels),
+ 		MergeCommitSHA: mergeCommitSHA,
+ 		SpamFlag:       false,
+ 		CreatedAt:      *pr.Created,
+ 		UpdatedAt:      *pr.Updated,
+ 		Events:         []models.PREvent{},
+ 		HasConflict:    !pr.Mergeable,
+ 		HTMLURL:        pr.HTMLURL,
+ 		MergedAt:       mergedAt,
+ 	}
 }
 
 func extractGiteaLabels(labels []*gitea.Label) []string {

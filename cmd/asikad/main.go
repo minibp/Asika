@@ -84,6 +84,9 @@ func main() {
     // Migrate old DB records (repo group name changes, e.g. "main" -> "default")
     migrateRepoGroupNames(cfg)
 
+    // Migrate PR states: closed PRs with MergeCommitSHA should be "merged"
+    migratePRStates(cfg)
+
 	// Create platform clients (needed for PR fetch)
 	clients := make(map[platforms.PlatformType]platforms.PlatformClient)
 
@@ -468,6 +471,35 @@ func migrateRepoGroupNames(cfg *models.Config) {
 
 	if len(prsToReinsert)+len(qisToReinsert) > 0 {
 		slog.Info("repo group migration complete", "prs_migrated", len(prsToReinsert), "queue_items_migrated", len(qisToReinsert))
+	}
+}
+
+// migratePRStates fixes historical PR records: closed PRs with MergedAt set should be "merged"
+func migratePRStates(cfg *models.Config) {
+	var keysToUpdate []struct {
+		key   string
+		value []byte
+	}
+	_ = db.ForEach(db.BucketPRs, func(key, value []byte) error {
+		var pr models.PRRecord
+		if json.Unmarshal(value, &pr) != nil {
+			return nil
+		}
+		if pr.State == "closed" && !pr.MergedAt.IsZero() {
+			pr.State = "merged"
+			data, _ := json.Marshal(pr)
+			keysToUpdate = append(keysToUpdate, struct {
+				key   string
+				value []byte
+			}{string(key), data})
+		}
+		return nil
+	})
+	for _, item := range keysToUpdate {
+		db.Put(db.BucketPRs, item.key, item.value)
+	}
+	if len(keysToUpdate) > 0 {
+		slog.Info("PR state migration complete", "merged_fixed", len(keysToUpdate))
 	}
 }
 
