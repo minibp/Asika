@@ -164,6 +164,12 @@ jobs:
           cp bin/asika-windows-amd64.exe asika.exe || true
           cp bin/asikad-windows-amd64.exe asikad.exe || true
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress --limit-output
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
       - name: Package Inno Setup
         shell: bash
         run: bash pack/scripts/package-inno.sh
