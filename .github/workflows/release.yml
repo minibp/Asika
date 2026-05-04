@@ -135,7 +135,7 @@ jobs:
           name: pkg-packages
           path: dist/*.pkg
 
-  package-nsis:
+  package-inno:
     needs: build
     runs-on: windows-latest
     steps:
@@ -164,15 +164,15 @@ jobs:
           cp bin/asika-windows-amd64.exe asika.exe || true
           cp bin/asikad-windows-amd64.exe asikad.exe || true
 
-      - name: Package NSIS
+      - name: Package Inno Setup
         shell: bash
-        run: bash pack/scripts/package-nsis.sh
+        run: bash pack/scripts/package-inno.sh
         env:
           TAG_NAME: ${{ github.ref_name }}
 
       - uses: actions/upload-artifact@v6
         with:
-          name: nsis-packages
+          name: inno-packages
           path: dist/*-setup.exe
 
   package-docker:
@@ -211,7 +211,7 @@ jobs:
           DOCKER_IMAGE_NAME: asikaproject/asika
 
   release:
-    needs: [build, package-deb, package-pkg, package-nsis, package-docker]
+    needs: [build, package-deb, package-pkg, package-inno, package-docker]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v6
@@ -222,7 +222,7 @@ jobs:
           cp binaries/* release-assets/ 2>/dev/null || true
           cp deb-packages/* release-assets/ 2>/dev/null || true
           cp pkg-packages/* release-assets/ 2>/dev/null || true
-          cp nsis-packages/* release-assets/ 2>/dev/null || true
+          cp inno-packages/* release-assets/ 2>/dev/null || true
           ls -lh release-assets/
 
       - uses: softprops/action-gh-release@v2
