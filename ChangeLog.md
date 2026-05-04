@@ -1,7 +1,9 @@
 # ChangeLog for Asika
 
 ## v20260505DEV
-- Fix release.yml: rename package-nsis job to package-inno, use correct script name
+- Fix package-inno.sh: output dir, mv path, remove redundant choco install
+- Fix release.yml: rename package-nsis job to package-inno, add choco install step
+- Refactor inno-test.yml to call package-inno.sh instead of inline steps
 - Fix PR list not showing all PRs by default (per_page 20 -> 100, default filter to All)
 - Fix PR list ordering: sort by PR number descending (newest first)
 - Fix merged PRs incorrectly stored as closed (detect via MergedAt instead of MergeCommitSHA)
