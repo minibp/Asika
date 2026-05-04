@@ -223,6 +223,7 @@ type Config struct {
 	GiteaBaseURL  string           `toml:"gitea_base_url" json:"gitea_base_url"`
 	Telegram      TelegramConfig   `toml:"telegram" json:"telegram"`
 	Feishu        FeishuConfig     `toml:"feishu" json:"feishu"`
+	Discord       DiscordConfig    `toml:"discord" json:"discord"`
 	Updates       UpdatesConfig    `toml:"updates" json:"updates"`
 	Stale         StaleConfig      `toml:"stale" json:"stale"`
 }
@@ -244,4 +245,12 @@ type FeishuConfig struct {
 	VerificationToken string `toml:"verification_token" json:"verification_token"`
 	EncryptKey   string `toml:"encrypt_key" json:"encrypt_key"`
 	AdminIDs     []string `toml:"admin_ids" json:"admin_ids"`
+}
+
+// DiscordConfig represents Discord bot configuration
+type DiscordConfig struct {
+	Enabled   bool     `toml:"enabled" json:"enabled"`
+	Token     string   `toml:"token" json:"token"`
+	AdminIDs  []string `toml:"admin_ids" json:"admin_ids"`
+	ChannelID string   `toml:"channel_id" json:"channel_id"`
 }

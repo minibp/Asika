@@ -62,6 +62,28 @@ func NewGitLabAtNotifier(config map[string]interface{}) *PlatformNotifier {
 	}
 }
 
+// NewGiteaAtNotifier creates a new Gitea @ notifier
+func NewGiteaAtNotifier(config map[string]interface{}) *PlatformNotifier {
+	to := make([]string, 0)
+	if toList, ok := config["to"].([]interface{}); ok {
+		for _, t := range toList {
+			if s, ok := t.(string); ok {
+				to = append(to, s)
+			}
+		}
+	}
+
+	owner, _ := config["owner"].(string)
+	repo, _ := config["repo"].(string)
+
+	return &PlatformNotifier{
+		platform: "gitea",
+		to:       to,
+		owner:    owner,
+		repo:     repo,
+	}
+}
+
 // SetClient sets the platform client
 func (n *PlatformNotifier) SetClient(client platforms.PlatformClient) {
 	n.client = client

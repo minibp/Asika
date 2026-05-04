@@ -111,7 +111,10 @@ func Bootstrap(cfg *models.Config) (*Server, error) {
 	// 11. Start Feishu bot
 	startFeishu(cfg, clients, queueMgr, syncr, spamDetector)
 
-	// 12. Start periodic update check (if enabled)
+	// 12. Start Discord bot
+	startDiscord(cfg, clients, queueMgr, syncr, spamDetector)
+
+	// 13. Start periodic update check (if enabled)
 	startUpdateCheck(cfg)
 
 	// 13. Start stale PR checker (if enabled)
@@ -192,6 +195,39 @@ func startFeishu(
 
 	go fsBot.Start()
 	slog.Info("feishu bot started", "app_id", cfg.Feishu.AppID)
+}
+
+// startDiscord starts the Discord interactive bot if configured.
+func startDiscord(
+	cfg *models.Config,
+	clients map[platforms.PlatformType]platforms.PlatformClient,
+	queueMgr *queue.Manager,
+	syncr *syncer.Syncer,
+	spamDetector *syncer.SpamDetector,
+) {
+	if cfg == nil || !cfg.Discord.Enabled || cfg.Discord.Token == "" {
+		return
+	}
+
+	cfgMap := map[string]interface{}{
+		"token":       cfg.Discord.Token,
+		"channel_ids": toStringList(cfg.Discord.AdminIDs),
+	}
+	discordNotifier := notifier.NewDiscordNotifier(cfgMap)
+
+	discordBot := platform.NewDiscordBot(
+		cfg, clients, queueMgr, syncr, spamDetector,
+		discordNotifier, cfg.Discord.AdminIDs,
+	)
+
+	if discordNotifier.Session() == nil {
+		slog.Warn("discord bot: failed to create session")
+		return
+	}
+
+	discordBot.SetSession(discordNotifier.Session())
+	go discordBot.Start()
+	slog.Info("discord bot started", "admin_ids", len(cfg.Discord.AdminIDs))
 }
 
 func parseDuration(s string, defaultDur time.Duration) time.Duration {
@@ -278,10 +314,14 @@ func createNotifierFromConfig(nc models.NotifyConfig) notifier.Notifier {
 		return notifier.NewGitHubAtNotifier(nc.Config)
 	case "gitlab_at":
 		return notifier.NewGitLabAtNotifier(nc.Config)
+	case "gitea_at":
+		return notifier.NewGiteaAtNotifier(nc.Config)
 	case "telegram":
 		return notifier.NewTelegramNotifier(nc.Config)
 	case "feishu":
 		return notifier.NewFeishuNotifier(nc.Config)
+	case "discord":
+		return notifier.NewDiscordNotifier(nc.Config)
 	}
 	return nil
 }

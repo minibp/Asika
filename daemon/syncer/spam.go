@@ -169,6 +169,8 @@ func (d *SpamDetector) sendSpamNotification(pr *models.PRRecord) {
 			n = notifier.NewGitHubAtNotifier(nc.Config)
 		case "gitlab_at":
 			n = notifier.NewGitLabAtNotifier(nc.Config)
+		case "gitea_at":
+			n = notifier.NewGiteaAtNotifier(nc.Config)
 		default:
 			continue
 		}

@@ -327,6 +327,8 @@ func (m *Manager) sendNotification(group, title, body string) {
 			n = notifier.NewGitHubAtNotifier(nc.Config)
 		case "gitlab_at":
 			n = notifier.NewGitLabAtNotifier(nc.Config)
+		case "gitea_at":
+			n = notifier.NewGiteaAtNotifier(nc.Config)
 		case "telegram":
 			n = notifier.NewTelegramNotifier(nc.Config)
 		case "feishu":
