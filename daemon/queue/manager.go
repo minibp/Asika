@@ -196,6 +196,19 @@ func (m *Manager) merge(item *models.QueueItem) error {
 		slog.Error("merge failed", "pr_id", pr.ID, "error", err)
 	} else {
 		slog.Info("merge succeeded", "pr_id", pr.ID)
+		// Fetch updated PR info from platform to get merge_commit_sha
+		updated, getErr := client.GetPR(ctx, owner, repo, pr.PRNumber)
+		if getErr == nil && updated != nil {
+			pr.State = updated.State
+			pr.MergeCommitSHA = updated.MergeCommitSHA
+			pr.UpdatedAt = updated.UpdatedAt
+		} else {
+			pr.State = "merged"
+			pr.UpdatedAt = time.Now()
+		}
+		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+		data, _ := json.Marshal(pr)
+		db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
 	}
 	return err
 }

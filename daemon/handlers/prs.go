@@ -162,8 +162,10 @@ func GetPR(c *gin.Context) {
         data, err := db.GetPRByIndex(prID, "", 0)
         if err == nil && data != nil {
             var pr models.PRRecord
-            if json.Unmarshal(data, &pr) == nil && pr.RepoGroup == repoGroup {
-                found = &pr
+            if json.Unmarshal(data, &pr) == nil {
+                if pr.RepoGroup == repoGroup || pr.RepoGroup == "" {
+                    found = &pr
+                }
             }
         }
     }

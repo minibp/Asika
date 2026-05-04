@@ -1,6 +1,8 @@
 # ChangeLog for Asika
 
 ## v20260505DEV
+- Fix cli not show pr
+- Add database sync step while starting Asika daemon
 - Fix merge queue deadlock: move db.Delete outside read transaction in CheckQueue
 - Fix approval deduplication in merge queue criteria (same user counted multiple times)
 - Fix merge method detection: use GetDefaultMergeMethod instead of defaulting to merge

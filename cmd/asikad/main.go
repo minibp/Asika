@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -104,6 +105,9 @@ func main() {
 			clients[platforms.PlatformGitea] = gc
 		}
 	}
+
+    // Sync PR states from platform to local DB (catch up after restart, stale DB, etc.)
+    syncPRStates(cfg, clients)
 
     // Initialize event bus
     events.Init()
@@ -458,5 +462,82 @@ func migrateRepoGroupNames(cfg *models.Config) {
 
 	if len(prsToReinsert)+len(qisToReinsert) > 0 {
 		slog.Info("repo group migration complete", "prs_migrated", len(prsToReinsert), "queue_items_migrated", len(qisToReinsert))
+	}
+}
+
+// syncPRStates refreshes PR state, merge_commit_sha, etc. from platform for open/closed PRs in local DB
+func syncPRStates(cfg *models.Config, clients map[platforms.PlatformType]platforms.PlatformClient) {
+	if len(clients) == 0 {
+		return
+	}
+
+	type prUpdate struct {
+		key    string
+		data   []byte
+		pr     models.PRRecord
+	}
+
+	ctx := context.Background()
+	var updates []prUpdate
+
+	slog.Info("syncing PR states from platform...")
+
+	_ = db.ForEach(db.BucketPRs, func(key, value []byte) error {
+		var pr models.PRRecord
+		if json.Unmarshal(value, &pr) != nil {
+			return nil
+		}
+		if pr.PRNumber == 0 || pr.Platform == "" {
+			return nil
+		}
+		if pr.State == "merged" || pr.State == "closed" {
+			return nil
+		}
+
+		group := config.GetRepoGroupByName(cfg, pr.RepoGroup)
+		if group == nil {
+			return nil
+		}
+
+		platType := platforms.PlatformType(pr.Platform)
+		client, ok := clients[platType]
+		if !ok {
+			return nil
+		}
+
+		owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+		updated, err := client.GetPR(ctx, owner, repo, pr.PRNumber)
+		if err != nil || updated == nil {
+			slog.Warn("failed to sync PR state", "pr", pr.PRNumber, "platform", pr.Platform, "error", err)
+			return nil
+		}
+
+		if updated.State != pr.State {
+			slog.Info("updating PR state", "pr", pr.PRNumber, "old", pr.State, "new", updated.State)
+			pr.State = updated.State
+		}
+		if updated.MergeCommitSHA != "" && pr.MergeCommitSHA != updated.MergeCommitSHA {
+			pr.MergeCommitSHA = updated.MergeCommitSHA
+		}
+		pr.IsApproved = updated.IsApproved
+		pr.IsDraft = updated.IsDraft
+		pr.HasConflict = updated.HasConflict
+		pr.HTMLURL = updated.HTMLURL
+		pr.Labels = updated.Labels
+		pr.UpdatedAt = updated.UpdatedAt
+
+		data, _ := json.Marshal(pr)
+		updates = append(updates, prUpdate{string(key), data, pr})
+		return nil
+	})
+
+	for _, u := range updates {
+		db.PutPRWithIndex(u.key, u.data, u.pr.ID, u.pr.RepoGroup, u.pr.PRNumber)
+	}
+
+	if len(updates) > 0 {
+		slog.Info("PR state sync complete", "updated", len(updates))
+	} else {
+		slog.Info("PR state sync complete (no changes)")
 	}
 }

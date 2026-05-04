@@ -89,12 +89,22 @@ func handleResponse(resp *http.Response, emptyMsg string) []interface{} {
 	if err := json.Unmarshal(body, &data); err != nil {
 		var obj map[string]interface{}
 		if err2 := json.Unmarshal(body, &obj); err2 == nil {
+			if msg, ok := obj["error"].(string); ok {
+				fmt.Println(msg)
+				return nil
+			}
 			if msg, ok := obj["message"].(string); ok {
 				fmt.Println(msg)
 				return nil
 			}
 			if d, ok := obj["data"].([]interface{}); ok {
 				data = d
+			}
+			if len(data) == 0 {
+				// Single object response, print it directly
+				b, _ := json.MarshalIndent(obj, "", "  ")
+				fmt.Println(string(b))
+				return []interface{}{obj}
 			}
 		}
 		if len(data) == 0 {
