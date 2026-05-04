@@ -1,6 +1,7 @@
 # ChangeLog for Asika
 
 ## v20260505DEV
+- Add asika wizard command: interactive setup with --file support
 - Fix package-inno.sh: output dir, mv path, remove redundant choco install
 - Fix release.yml: rename package-nsis job to package-inno, add choco install step
 - Refactor inno-test.yml to call package-inno.sh instead of inline steps
