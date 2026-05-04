@@ -84,10 +84,7 @@ func main() {
     // Migrate old DB records (repo group name changes, e.g. "main" -> "default")
     migrateRepoGroupNames(cfg)
 
-    // Initialize auth
-    auth.Init(cfg.Auth.JWTSecret, config.GenerateTokenExpiry(cfg.Auth.TokenExpiry))
-
-	// Create platform clients
+	// Create platform clients (needed for PR fetch)
 	clients := make(map[platforms.PlatformType]platforms.PlatformClient)
 
 	if cfg.Tokens.GitHub != "" {
@@ -106,11 +103,27 @@ func main() {
 		}
 	}
 
-    // Sync PR states from platform to local DB (catch up after restart, stale DB, etc.)
-    syncPRStates(cfg, clients)
+    // Initialize auth
+    auth.Init(cfg.Auth.JWTSecret, config.GenerateTokenExpiry(cfg.Auth.TokenExpiry))
 
-    // Initialize event bus
+    // Initialize event bus (must be before PR fetch to avoid panic)
     events.Init()
+
+    // Initial PR fetch: fetch all PRs from platforms after events init
+    slog.Info("performing initial PR fetch before starting server...")
+    if cfg.Events.Mode == "polling" {
+        poller := polling.NewPoller(cfg, clients)
+        poller.PollOnce() // Synchronous initial fetch
+        slog.Info("initial PR fetch complete")
+        // Start background polling
+        go poller.Start()
+        slog.Info("background poller started")
+    } else {
+        // Even in webhook mode, do an initial fetch
+        poller := polling.NewPoller(cfg, clients)
+        poller.PollOnce()
+        slog.Info("initial PR fetch complete (webhook mode)")
+    }
 
     // Setup SIGHUP handler for config reload
     setupSIGHUPHandler()
@@ -146,13 +159,6 @@ func main() {
         }
     }()
     slog.Info("spam detector started", "enabled", cfg.Spam.Enabled)
-
-    // Start poller if in polling mode
-    if cfg.Events.Mode == "polling" {
-        poller := polling.NewPoller(cfg, clients)
-        go poller.Start()
-        slog.Info("poller started")
-    }
 
     // Start event consumer (with clients for wiring)
     eventConsumer := consumer.NewConsumerWithClients(cfg, clients)

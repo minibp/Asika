@@ -51,6 +51,11 @@ func (p *Poller) Start() {
 	}
 }
 
+// PollOnce performs a single poll cycle (can be called externally for initial fetch)
+func (p *Poller) PollOnce() {
+	p.pollOnce()
+}
+
 // Stop stops the poller
 func (p *Poller) Stop() {
 	close(p.stop)
