@@ -283,10 +283,10 @@ func (b *TelegramBot) handleShowPR(c telebot.Context) error {
 
 	// Add action buttons
 	selector := &telebot.ReplyMarkup{}
-	btnApprove := selector.Data("✅ Approve", "approve", fmt.Sprintf("%s#%s", repoGroup, found.ID))
-	btnClose := selector.Data("❌ Close", "close", fmt.Sprintf("%s#%s", repoGroup, found.ID))
-	btnSpam := selector.Data("🚫 Spam", "spam", fmt.Sprintf("%s#%s", repoGroup, found.ID))
-	btnReopen := selector.Data("🔄 Reopen", "reopen", fmt.Sprintf("%s#%s", repoGroup, found.ID))
+	btnApprove := selector.Data("✅ Approve", "approve", fmt.Sprintf("approve:%s#%s", repoGroup, found.ID))
+	btnClose := selector.Data("❌ Close", "close", fmt.Sprintf("close:%s#%s", repoGroup, found.ID))
+	btnSpam := selector.Data("🚫 Spam", "spam", fmt.Sprintf("spam:%s#%s", repoGroup, found.ID))
+	btnReopen := selector.Data("🔄 Reopen", "reopen", fmt.Sprintf("reopen:%s#%s", repoGroup, found.ID))
 	selector.Inline(selector.Row(btnApprove, btnClose), selector.Row(btnSpam, btnReopen))
 
 	return c.Send(msg, &telebot.SendOptions{
@@ -570,11 +570,26 @@ func (b *TelegramBot) handleShowConfig(c telebot.Context) error {
 
 // handleCallback handles inline button callbacks.
 func (b *TelegramBot) handleCallback(c telebot.Context) error {
+	cb := c.Callback()
+	if cb == nil {
+		return nil
+	}
+
 	if !b.isAdmin(c) {
 		return c.Respond(&telebot.CallbackResponse{Text: "Access denied."})
 	}
 
-	data := c.Callback().Data
+	// telebot v3 sends callback data as \f<unique>|<data>
+	// e.g., \freopen|reopen:default#241
+	data := cb.Data
+
+	// Strip the \f<unique>| prefix if present
+	if len(data) > 0 && data[0] == '\f' {
+		if idx := strings.Index(data, "|"); idx >= 0 {
+			data = data[idx+1:]
+		}
+	}
+
 	parts := strings.SplitN(data, ":", 2)
 	if len(parts) != 2 {
 		return c.Respond(&telebot.CallbackResponse{Text: "Invalid callback."})
@@ -591,8 +606,8 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 	repoGroup := payload[:idx]
 	prID := payload[idx+1:]
 
-	pr, _ := getPRByID(repoGroup, prID)
-	if pr == nil {
+	pr, err := getPRByID(repoGroup, prID)
+	if err != nil || pr == nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "PR not found."})
 	}
 
@@ -611,42 +626,86 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 
 	switch action {
 	case "approve":
-		if err := client.ApprovePR(ctx, owner, repo, pr.PRNumber); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Failed: %v", err)})
+		if pr.State == "merged" || pr.State == "closed" {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Cannot approve %s PR.", pr.State)})
 		}
+		if err := client.ApprovePR(ctx, owner, repo, pr.PRNumber); err != nil {
+			msg := fmt.Sprintf("Failed: %v", err)
+			if len(msg) > 200 {
+				msg = msg[:197] + "..."
+			}
+			return c.Respond(&telebot.CallbackResponse{Text: msg})
+		}
+		pr.IsApproved = true
+		prData, _ := json.Marshal(pr)
+		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+		db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
 		c.Respond(&telebot.CallbackResponse{Text: "Approved ✅"})
-		c.Edit(fmt.Sprintf("%s\n\n<i>✅ Approved via Telegram</i>", html.EscapeString(c.Message().Text)),
-			&telebot.SendOptions{ParseMode: telebot.ModeHTML})
 
 	case "close":
-		if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Failed: %v", err)})
+		if pr.State == "closed" || pr.State == "merged" {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("PR is already %s.", pr.State)})
 		}
+		if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+			msg := fmt.Sprintf("Failed: %v", err)
+			if len(msg) > 200 {
+				msg = msg[:197] + "..."
+			}
+			return c.Respond(&telebot.CallbackResponse{Text: msg})
+		}
+		pr.State = "closed"
+		prData, _ := json.Marshal(pr)
+		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+		db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
 		c.Respond(&telebot.CallbackResponse{Text: "Closed ❌"})
 
 	case "reopen":
+		if pr.State == "merged" {
+			return c.Respond(&telebot.CallbackResponse{Text: "Cannot reopen merged PR."})
+		}
+		if pr.State == "open" {
+			return c.Respond(&telebot.CallbackResponse{Text: "PR is already open."})
+		}
 		if err := client.ReopenPR(ctx, owner, repo, pr.PRNumber); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Failed: %v", err)})
+			msg := fmt.Sprintf("Failed: %v", err)
+			if len(msg) > 200 {
+				msg = msg[:197] + "..."
+			}
+			return c.Respond(&telebot.CallbackResponse{Text: msg})
 		}
 		if pr.SpamFlag {
 			pr.State = "open"
 			pr.SpamFlag = false
-			pr.UpdatedAt = time.Now()
-			data, _ := json.Marshal(pr)
-			key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
-			db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
+		} else {
+			pr.State = "open"
 		}
+		pr.UpdatedAt = time.Now()
+		data, _ := json.Marshal(pr)
+		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+		db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
 		c.Respond(&telebot.CallbackResponse{Text: "Reopened 🔄"})
 
 	case "spam":
+		if pr.State == "closed" || pr.State == "merged" {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("PR is already %s.", pr.State)})
+		}
 		pr.SpamFlag = true
 		pr.State = "spam"
 		pr.UpdatedAt = time.Now()
 		data, _ := json.Marshal(pr)
 		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 		db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
-		client.ClosePR(ctx, owner, repo, pr.PRNumber)
+		if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+			msg := fmt.Sprintf("Marked spam but close failed: %v", err)
+			if len(msg) > 200 {
+				msg = msg[:197] + "..."
+			}
+			return c.Respond(&telebot.CallbackResponse{Text: msg})
+		}
 		c.Respond(&telebot.CallbackResponse{Text: "Marked as spam 🚫"})
+
+	default:
+		return c.Respond(&telebot.CallbackResponse{Text: "Unknown action."})
 	}
 
 	return nil
