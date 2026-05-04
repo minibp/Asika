@@ -17,7 +17,7 @@ var (
 // Init initializes the BoltDB database
 func Init(dbPath string) error {
     var err error
-    DB, err = bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 5 * time.Second})
+    DB, err = bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 30 * time.Second})
     if err != nil {
         return err
     }

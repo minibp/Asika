@@ -55,66 +55,31 @@ func ListPRs(c *gin.Context) {
 		return
 	}
 
-	// Get platform client
-	client := getClientForGroup(group, platform)
-	if client == nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
-		return
-	}
-
-	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
-	if owner == "" || repo == "" {
-		c.JSON(http.StatusOK, records)
-		return
-	}
-
-	prs, err := client.ListPRs(c.Request.Context(), owner, repo, state)
-	if err != nil {
-		slog.Error("failed to list PRs from platform", "error", err, "platform", platform, "repo_group", repoGroup)
-		c.JSON(http.StatusOK, gin.H{"error": "platform API error: " + err.Error(), "data": records})
-		return
-	}
-
-	// Convert to PRRecord format
-	for _, pr := range prs {
-		records = append(records, models.PRRecord{
-			PRNumber: pr.PRNumber,
-			Title:    pr.Title,
-			Author:   pr.Author,
-			State:    pr.State,
-			Labels:   pr.Labels,
-			Platform: platform,
-			IsDraft:  pr.IsDraft,
-		})
-	}
-
-	// Filter by draft status if requested
-	if isDraftStr != "" {
-		isDraft := isDraftStr == "true"
-		filtered := make([]models.PRRecord, 0)
-		for _, pr := range records {
-			if pr.IsDraft == isDraft {
-				filtered = append(filtered, pr)
+	// Read PRs from local DB instead of remote API for fast response
+	_ = db.ForEach(db.BucketPRs, func(key, value []byte) error {
+		var pr models.PRRecord
+		if err := json.Unmarshal(value, &pr); err != nil {
+			return nil
+		}
+		if pr.RepoGroup != repoGroup && pr.RepoGroup == "" {
+			return nil
+		}
+		if platform != "" && pr.Platform != platform {
+			return nil
+		}
+		if state != "" && pr.State != state {
+			return nil
+		}
+		if isDraftStr != "" {
+			isDraft := isDraftStr == "true"
+			if pr.IsDraft != isDraft {
+				return nil
 			}
 		}
-		records = filtered
-	}
-
-	// Filter by author if requested
-	if author != "" {
-		filtered := make([]models.PRRecord, 0)
-		for _, pr := range records {
-			if pr.Author == author {
-				filtered = append(filtered, pr)
-			}
+		if author != "" && pr.Author != author {
+			return nil
 		}
-		records = filtered
-	}
-
-	// Filter by label if requested
-	if label != "" {
-		filtered := make([]models.PRRecord, 0)
-		for _, pr := range records {
+		if label != "" {
 			hasLabel := false
 			for _, l := range pr.Labels {
 				if l == label {
@@ -122,40 +87,27 @@ func ListPRs(c *gin.Context) {
 					break
 				}
 			}
-			if hasLabel {
-				filtered = append(filtered, pr)
+			if !hasLabel {
+				return nil
 			}
 		}
-		records = filtered
-	}
-
-	// Filter by created_after if requested
-	if createdAfter != "" {
-		t, err := time.Parse(time.RFC3339, createdAfter)
-		if err == nil {
-			filtered := make([]models.PRRecord, 0)
-			for _, pr := range records {
-				if pr.CreatedAt.After(t) {
-					filtered = append(filtered, pr)
+		if createdAfter != "" {
+			if t, err := time.Parse(time.RFC3339, createdAfter); err == nil {
+				if !pr.CreatedAt.After(t) {
+					return nil
 				}
 			}
-			records = filtered
 		}
-	}
-
-	// Filter by updated_after if requested
-	if updatedAfter != "" {
-		t, err := time.Parse(time.RFC3339, updatedAfter)
-		if err == nil {
-			filtered := make([]models.PRRecord, 0)
-			for _, pr := range records {
-				if pr.UpdatedAt.After(t) {
-					filtered = append(filtered, pr)
+		if updatedAfter != "" {
+			if t, err := time.Parse(time.RFC3339, updatedAfter); err == nil {
+				if !pr.UpdatedAt.After(t) {
+					return nil
 				}
 			}
-			records = filtered
 		}
-	}
+		records = append(records, pr)
+		return nil
+	})
 
 	// Pagination
 	page := 1
@@ -283,54 +235,143 @@ func ApprovePR(c *gin.Context) {
 		return
 	}
 
-	// Get platform from PR record in DB
+	// Try to get platform from DB first, fallback to repo group config
+	platform := getPlatformForGroup(group)
+	prNumber, err := strconv.Atoi(prID)
+
 	key := repoGroup + "#" + prID
-	data, err := db.Get(db.BucketPRs, key)
-	if err != nil || data == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+	data, dbErr := db.Get(db.BucketPRs, key)
+	if dbErr == nil && data != nil {
+		var pr models.PRRecord
+		if json.Unmarshal(data, &pr) == nil && pr.Platform != "" {
+			platform = pr.Platform
+		}
+		if pr.PRNumber > 0 {
+			prNumber = pr.PRNumber
+		}
+	}
+
+	if platform == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
+		return
+	}
+	if err != nil || prNumber == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
 		return
 	}
 
-	var pr models.PRRecord
-	if err := json.Unmarshal(data, &pr); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse PR"})
-		return
-	}
-
-	client := getClientForGroup(group, pr.Platform)
+	client := getClientForGroup(group, platform)
 	if client == nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
 		return
 	}
 
-	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
 	if owner == "" || repo == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
 		return
 	}
 
-	if err := client.ApprovePR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+	if err := client.ApprovePR(c.Request.Context(), owner, repo, prNumber); err != nil {
 		slog.Error("failed to approve PR", "error", err)
 		db.AppendAuditLog("error", "PR approve failed", map[string]interface{}{
-			"pr_number":  pr.PRNumber,
-			"pr_title":    pr.Title,
+			"pr_number":  prNumber,
 			"repo_group":  repoGroup,
 			"actor":       c.GetString("username"),
-			"platform":    pr.Platform,
+			"platform":    platform,
 			"error":       err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to approve PR"})
 		return
 	}
 
+	// Fetch PR details from platform API
+	prFromAPI, apiErr := client.GetPR(c.Request.Context(), owner, repo, prNumber)
+	if apiErr != nil {
+		slog.Warn("failed to fetch PR after approval", "error", apiErr, "pr_number", prNumber)
+	}
+
+	// Build or update PR record
+	var pr *models.PRRecord
+	var isNew bool
+
+	if dbErr == nil && data != nil {
+		var existing models.PRRecord
+		if json.Unmarshal(data, &existing) == nil {
+			pr = &existing
+		}
+	}
+
+	if pr == nil {
+		isNew = true
+		pr = &models.PRRecord{
+			ID:       fmt.Sprintf("%d", prNumber),
+			Platform: platform,
+			RepoGroup: repoGroup,
+			PRNumber: prNumber,
+		}
+	}
+
+	// Ensure critical fields are populated (fallback for old DB records)
+	if pr.ID == "" {
+		pr.ID = fmt.Sprintf("%d", prNumber)
+	}
+	if pr.RepoGroup == "" {
+		pr.RepoGroup = repoGroup
+	}
+	if pr.PRNumber == 0 {
+		pr.PRNumber = prNumber
+	}
+	if pr.Platform == "" {
+		pr.Platform = platform
+	}
+
+	// Update with fresh data from API if available
+	if prFromAPI != nil {
+		if prFromAPI.Title != "" {
+			pr.Title = prFromAPI.Title
+		}
+		if prFromAPI.Author != "" {
+			pr.Author = prFromAPI.Author
+		}
+		if prFromAPI.State != "" {
+			pr.State = prFromAPI.State
+		}
+		if len(prFromAPI.Labels) > 0 {
+			pr.Labels = prFromAPI.Labels
+		}
+		pr.IsDraft = prFromAPI.IsDraft
+		pr.HasConflict = prFromAPI.HasConflict
+		pr.Platform = platform
+		pr.RepoGroup = repoGroup
+		pr.PRNumber = prNumber
+	}
+
+	// Save PR to DB
+	updated, _ := json.Marshal(pr)
+	db.PutPRWithIndex(key, updated, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	// Add to merge queue
+	if queueMgr != nil {
+		if err := queueMgr.AddToQueue(pr); err != nil {
+			slog.Warn("failed to add PR to queue", "error", err, "pr_number", prNumber)
+		} else {
+			if isNew {
+				slog.Info("PR added to merge queue after approval", "pr_number", prNumber, "repo_group", repoGroup)
+			}
+			// Trigger immediate queue check
+			go queueMgr.CheckQueue()
+		}
+	}
+
 	db.AppendAuditLog("info", "PR approved", map[string]interface{}{
-		"pr_number":  pr.PRNumber,
-		"pr_title":    pr.Title,
+		"pr_number":  prNumber,
 		"repo_group":  repoGroup,
 		"actor":       c.GetString("username"),
-		"platform":    pr.Platform,
+		"platform":    platform,
+		"added_to_queue": true,
 	})
-	c.JSON(http.StatusOK, gin.H{"message": "PR approved"})
+	c.JSON(http.StatusOK, gin.H{"message": "PR approved", "queued": true})
 }
 
 // ClosePR handles POST /api/v1/repos/:repo_group/prs/:pr_id/close (8.2)
@@ -345,39 +386,49 @@ func ClosePR(c *gin.Context) {
 		return
 	}
 
+	platform := getPlatformForGroup(group)
+	prNumber, err := strconv.Atoi(prID)
+
 	key := repoGroup + "#" + prID
-	data, err := db.Get(db.BucketPRs, key)
-	if err != nil || data == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+	data, dbErr := db.Get(db.BucketPRs, key)
+	if dbErr == nil && data != nil {
+		var pr models.PRRecord
+		if json.Unmarshal(data, &pr) == nil && pr.Platform != "" {
+			platform = pr.Platform
+		}
+		if pr.PRNumber > 0 {
+			prNumber = pr.PRNumber
+		}
+	}
+
+	if platform == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
+		return
+	}
+	if err != nil || prNumber == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
 		return
 	}
 
-	var pr models.PRRecord
-	if err := json.Unmarshal(data, &pr); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse PR"})
-		return
-	}
-
-	client := getClientForGroup(group, pr.Platform)
+	client := getClientForGroup(group, platform)
 	if client == nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
 		return
 	}
 
-	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
 	if owner == "" || repo == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
 		return
 	}
 
-	if err := client.ClosePR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+	if err := client.ClosePR(c.Request.Context(), owner, repo, prNumber); err != nil {
 		slog.Error("failed to close PR", "error", err)
 		db.AppendAuditLog("error", "PR close failed", map[string]interface{}{
-			"pr_number":  pr.PRNumber,
-			"pr_title":    pr.Title,
+			"pr_number":  prNumber,
 			"repo_group":  repoGroup,
 			"actor":       c.GetString("username"),
-			"platform":    pr.Platform,
+			"platform":    platform,
 			"error":       err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to close PR"})
@@ -385,11 +436,10 @@ func ClosePR(c *gin.Context) {
 	}
 
 	db.AppendAuditLog("info", "PR closed", map[string]interface{}{
-		"pr_number":  pr.PRNumber,
-		"pr_title":    pr.Title,
+		"pr_number":  prNumber,
 		"repo_group":  repoGroup,
 		"actor":       c.GetString("username"),
-		"platform":    pr.Platform,
+		"platform":    platform,
 	})
 	c.JSON(http.StatusOK, gin.H{"message": "PR closed"})
 }
@@ -406,39 +456,49 @@ func ReopenPR(c *gin.Context) {
 		return
 	}
 
+	platform := getPlatformForGroup(group)
+	prNumber, err := strconv.Atoi(prID)
+
 	key := repoGroup + "#" + prID
-	data, err := db.Get(db.BucketPRs, key)
-	if err != nil || data == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+	data, dbErr := db.Get(db.BucketPRs, key)
+	if dbErr == nil && data != nil {
+		var pr models.PRRecord
+		if json.Unmarshal(data, &pr) == nil && pr.Platform != "" {
+			platform = pr.Platform
+		}
+		if pr.PRNumber > 0 {
+			prNumber = pr.PRNumber
+		}
+	}
+
+	if platform == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
+		return
+	}
+	if err != nil || prNumber == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
 		return
 	}
 
-	var pr models.PRRecord
-	if err := json.Unmarshal(data, &pr); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse PR"})
-		return
-	}
-
-	client := getClientForGroup(group, pr.Platform)
+	client := getClientForGroup(group, platform)
 	if client == nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
 		return
 	}
 
-	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
 	if owner == "" || repo == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
 		return
 	}
 
-	if err := client.ReopenPR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+	if err := client.ReopenPR(c.Request.Context(), owner, repo, prNumber); err != nil {
 		slog.Error("failed to reopen PR", "error", err)
 		db.AppendAuditLog("error", "PR reopen failed", map[string]interface{}{
-			"pr_number":  pr.PRNumber,
-			"pr_title":    pr.Title,
+			"pr_number":  prNumber,
 			"repo_group":  repoGroup,
 			"actor":       c.GetString("username"),
-			"platform":    pr.Platform,
+			"platform":    platform,
 			"error":       err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reopen PR"})
@@ -446,11 +506,10 @@ func ReopenPR(c *gin.Context) {
 	}
 
 	db.AppendAuditLog("info", "PR reopened", map[string]interface{}{
-		"pr_number":  pr.PRNumber,
-		"pr_title":    pr.Title,
+		"pr_number":  prNumber,
 		"repo_group":  repoGroup,
 		"actor":       c.GetString("username"),
-		"platform":    pr.Platform,
+		"platform":    platform,
 	})
 	c.JSON(http.StatusOK, gin.H{"message": "PR reopened"})
 }
@@ -467,40 +526,51 @@ func MarkSpam(c *gin.Context) {
 		return
 	}
 
+	platform := getPlatformForGroup(group)
+	prNumber, err := strconv.Atoi(prID)
+
 	key := repoGroup + "#" + prID
-	data, err := db.Get(db.BucketPRs, key)
-	if err != nil || data == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
-		return
-	}
-
+	data, dbErr := db.Get(db.BucketPRs, key)
 	var pr models.PRRecord
-	if err := json.Unmarshal(data, &pr); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse PR"})
+	if dbErr == nil && data != nil {
+		json.Unmarshal(data, &pr)
+		if pr.Platform != "" {
+			platform = pr.Platform
+		}
+		if pr.PRNumber > 0 {
+			prNumber = pr.PRNumber
+		}
+	}
+
+	if platform == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
+		return
+	}
+	if err != nil || prNumber == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
 		return
 	}
 
-	client := getClientForGroup(group, pr.Platform)
+	client := getClientForGroup(group, platform)
 	if client == nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
 		return
 	}
 
-	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
 	if owner == "" || repo == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
 		return
 	}
 
 	// Close the PR as spam
-	if err := client.ClosePR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+	if err := client.ClosePR(c.Request.Context(), owner, repo, prNumber); err != nil {
 		slog.Error("failed to mark PR as spam", "error", err)
 		db.AppendAuditLog("error", "PR spam marking failed", map[string]interface{}{
-			"pr_number":  pr.PRNumber,
-			"pr_title":    pr.Title,
+			"pr_number":  prNumber,
 			"repo_group":  repoGroup,
 			"actor":       c.GetString("username"),
-			"platform":    pr.Platform,
+			"platform":    platform,
 			"error":       err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to mark as spam"})
@@ -510,18 +580,18 @@ func MarkSpam(c *gin.Context) {
 	// Update PR record to mark as spam
 	pr.State = "spam"
 	pr.SpamFlag = true
-updated, _ := json.Marshal(pr)
-    db.PutPRWithIndex(key, updated, pr.ID, repoGroup, pr.PRNumber)
+	pr.Platform = platform
+	pr.PRNumber = prNumber
+	pr.RepoGroup = repoGroup
+	updated, _ := json.Marshal(pr)
+	db.PutPRWithIndex(key, updated, pr.ID, repoGroup, prNumber)
 
 	db.AppendAuditLog("warn", "PR marked as spam", map[string]interface{}{
-		"pr_number":  pr.PRNumber,
-		"pr_title":    pr.Title,
+		"pr_number":  prNumber,
 		"repo_group":  repoGroup,
 		"actor":       c.GetString("username"),
-		"platform":    pr.Platform,
+		"platform":    platform,
 	})
-
-	// TODO: Send notifications to admins
 
 	c.JSON(http.StatusOK, gin.H{"message": "PR marked as spam"})
 }
@@ -546,39 +616,49 @@ func CommentPR(c *gin.Context) {
 		return
 	}
 
+	platform := getPlatformForGroup(group)
+	prNumber, err := strconv.Atoi(prID)
+
 	key := repoGroup + "#" + prID
-	data, err := db.Get(db.BucketPRs, key)
-	if err != nil || data == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+	data, dbErr := db.Get(db.BucketPRs, key)
+	if dbErr == nil && data != nil {
+		var pr models.PRRecord
+		if json.Unmarshal(data, &pr) == nil && pr.Platform != "" {
+			platform = pr.Platform
+		}
+		if pr.PRNumber > 0 {
+			prNumber = pr.PRNumber
+		}
+	}
+
+	if platform == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
+		return
+	}
+	if err != nil || prNumber == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
 		return
 	}
 
-	var pr models.PRRecord
-	if err := json.Unmarshal(data, &pr); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse PR"})
-		return
-	}
-
-	client := getClientForGroup(group, pr.Platform)
+	client := getClientForGroup(group, platform)
 	if client == nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
 		return
 	}
 
-	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
+	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
 	if owner == "" || repo == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
 		return
 	}
 
-	if err := client.CommentPR(c.Request.Context(), owner, repo, pr.PRNumber, req.Body); err != nil {
+	if err := client.CommentPR(c.Request.Context(), owner, repo, prNumber, req.Body); err != nil {
 		slog.Error("failed to comment on PR", "error", err)
 		db.AppendAuditLog("error", "PR comment failed", map[string]interface{}{
-			"pr_number":  pr.PRNumber,
-			"pr_title":    pr.Title,
+			"pr_number":  prNumber,
 			"repo_group":  repoGroup,
 			"actor":       c.GetString("username"),
-			"platform":    pr.Platform,
+			"platform":    platform,
 			"error":       err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to comment on PR"})
@@ -586,11 +666,10 @@ func CommentPR(c *gin.Context) {
 	}
 
 	db.AppendAuditLog("info", "PR commented", map[string]interface{}{
-		"pr_number":  pr.PRNumber,
-		"pr_title":    pr.Title,
+		"pr_number":  prNumber,
 		"repo_group":  repoGroup,
 		"actor":       c.GetString("username"),
-		"platform":    pr.Platform,
+		"platform":    platform,
 		"comment":     req.Body[:min(len(req.Body), 50)],
 	})
 	c.JSON(http.StatusOK, gin.H{"message": "comment added"})
@@ -615,44 +694,42 @@ func BatchApprovePR(c *gin.Context) {
 		return
 	}
 
+	platform := getPlatformForGroup(group)
+	if platform == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
+		return
+	}
+
+	client := getClientForGroup(group, platform)
+	if client == nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
+		return
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
+	if owner == "" || repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
+		return
+	}
+
 	results := make(map[string]string)
 	for _, prID := range req.PRIDs {
-		key := repoGroup + "#" + prID
-		data, err := db.Get(db.BucketPRs, key)
-		if err != nil || data == nil {
-			results[prID] = "not found"
+		prNumber, err := strconv.Atoi(prID)
+		if err != nil || prNumber == 0 {
+			results[prID] = "invalid pr_id"
 			continue
 		}
 
-		var pr models.PRRecord
-		if err := json.Unmarshal(data, &pr); err != nil {
-			results[prID] = "parse error"
-			continue
-		}
-
-		client := getClientForGroup(group, pr.Platform)
-		if client == nil {
-			results[prID] = "no client"
-			continue
-		}
-
-		owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
-		if owner == "" || repo == "" {
-			results[prID] = "cannot resolve repo"
-			continue
-		}
-
-		if err := client.ApprovePR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+		if err := client.ApprovePR(c.Request.Context(), owner, repo, prNumber); err != nil {
 			results[prID] = "failed: " + err.Error()
 			slog.Warn("batch approve failed", "pr_id", prID, "error", err)
 		} else {
 			results[prID] = "success"
 			db.AppendAuditLog("info", "PR approved (batch)", map[string]interface{}{
-				"pr_number":  pr.PRNumber,
-				"pr_title":    pr.Title,
+				"pr_number":  prNumber,
 				"repo_group":  repoGroup,
 				"actor":       c.GetString("username"),
-				"platform":    pr.Platform,
+				"platform":    platform,
 				"batch":       true,
 			})
 		}
@@ -680,44 +757,42 @@ func BatchClosePR(c *gin.Context) {
 		return
 	}
 
+	platform := getPlatformForGroup(group)
+	if platform == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
+		return
+	}
+
+	client := getClientForGroup(group, platform)
+	if client == nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
+		return
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
+	if owner == "" || repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
+		return
+	}
+
 	results := make(map[string]string)
 	for _, prID := range req.PRIDs {
-		key := repoGroup + "#" + prID
-		data, err := db.Get(db.BucketPRs, key)
-		if err != nil || data == nil {
-			results[prID] = "not found"
+		prNumber, err := strconv.Atoi(prID)
+		if err != nil || prNumber == 0 {
+			results[prID] = "invalid pr_id"
 			continue
 		}
 
-		var pr models.PRRecord
-		if err := json.Unmarshal(data, &pr); err != nil {
-			results[prID] = "parse error"
-			continue
-		}
-
-		client := getClientForGroup(group, pr.Platform)
-		if client == nil {
-			results[prID] = "no client"
-			continue
-		}
-
-		owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
-		if owner == "" || repo == "" {
-			results[prID] = "cannot resolve repo"
-			continue
-		}
-
-		if err := client.ClosePR(c.Request.Context(), owner, repo, pr.PRNumber); err != nil {
+		if err := client.ClosePR(c.Request.Context(), owner, repo, prNumber); err != nil {
 			results[prID] = "failed: " + err.Error()
 			slog.Warn("batch close failed", "pr_id", prID, "error", err)
 		} else {
 			results[prID] = "success"
 			db.AppendAuditLog("info", "PR closed (batch)", map[string]interface{}{
-				"pr_number":  pr.PRNumber,
-				"pr_title":    pr.Title,
+				"pr_number":  prNumber,
 				"repo_group":  repoGroup,
 				"actor":       c.GetString("username"),
-				"platform":    pr.Platform,
+				"platform":    platform,
 				"batch":       true,
 			})
 		}
@@ -747,44 +822,42 @@ func BatchLabelPR(c *gin.Context) {
 		return
 	}
 
+	platform := getPlatformForGroup(group)
+	if platform == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
+		return
+	}
+
+	client := getClientForGroup(group, platform)
+	if client == nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
+		return
+	}
+
+	owner, repo := config.GetOwnerRepoFromGroup(group, platform)
+	if owner == "" || repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot resolve repo"})
+		return
+	}
+
 	results := make(map[string]string)
 	for _, prID := range req.PRIDs {
-		key := repoGroup + "#" + prID
-		data, err := db.Get(db.BucketPRs, key)
-		if err != nil || data == nil {
-			results[prID] = "not found"
+		prNumber, err := strconv.Atoi(prID)
+		if err != nil || prNumber == 0 {
+			results[prID] = "invalid pr_id"
 			continue
 		}
 
-		var pr models.PRRecord
-		if err := json.Unmarshal(data, &pr); err != nil {
-			results[prID] = "parse error"
-			continue
-		}
-
-		client := getClientForGroup(group, pr.Platform)
-		if client == nil {
-			results[prID] = "no client"
-			continue
-		}
-
-		owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
-		if owner == "" || repo == "" {
-			results[prID] = "cannot resolve repo"
-			continue
-		}
-
-		if err := client.AddLabel(c.Request.Context(), owner, repo, pr.PRNumber, req.Label, req.Color); err != nil {
+		if err := client.AddLabel(c.Request.Context(), owner, repo, prNumber, req.Label, req.Color); err != nil {
 			results[prID] = "failed: " + err.Error()
 			slog.Warn("batch label failed", "pr_id", prID, "error", err)
 		} else {
 			results[prID] = "success"
 			db.AppendAuditLog("info", "PR labeled (batch)", map[string]interface{}{
-				"pr_number":  pr.PRNumber,
-				"pr_title":    pr.Title,
+				"pr_number":  prNumber,
 				"repo_group":  repoGroup,
 				"actor":       c.GetString("username"),
-				"platform":    pr.Platform,
+				"platform":    platform,
 				"label":       req.Label,
 				"batch":       true,
 			})
@@ -827,4 +900,18 @@ func getClientForGroup(group *models.RepoGroup, platform string) platforms.Platf
 		return nil
 	}
 	return clients[platforms.PlatformType(platform)]
+}
+
+// getPlatformForGroup determines the platform for a repo group based on configured repos
+func getPlatformForGroup(group *models.RepoGroup) string {
+	if group.GitHub != "" {
+		return "github"
+	}
+	if group.GitLab != "" {
+		return "gitlab"
+	}
+	if group.Gitea != "" {
+		return "gitea"
+	}
+	return ""
 }

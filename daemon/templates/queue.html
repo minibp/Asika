@@ -10,8 +10,12 @@
 {{template "header" .}}
 <div class="container">
 <h1>Merge Queue</h1>
+<div class="form-group">
+    <label>Repository Group:</label>
+    <select id="repoGroupSelect" onchange="loadQueue()">
+    </select>
+</div>
 <div class="card">
-    <p style="margin:0 0 15px 0; color: #666;">Repository Group: <strong>main</strong></p>
     <button class="btn btn-primary" onclick="recheckQueue()">Recheck Queue</button>
     <div class="table-wrapper">
     <table style="margin-top: 20px;">
@@ -34,21 +38,85 @@
 </div>
 {{template "scripts"}}
 <script>
+    async function loadRepoGroups() {
+        try {
+            const resp = await apiRequest('/api/v1/config');
+            if (resp.ok) {
+                const cfg = await resp.json();
+                const sel = document.getElementById('repoGroupSelect');
+                sel.innerHTML = '';
+                if (cfg.repo_groups && cfg.repo_groups.length > 0) {
+                    cfg.repo_groups.forEach(g => {
+                        const opt = document.createElement('option');
+                        opt.value = g.name;
+                        opt.textContent = g.name;
+                        sel.appendChild(opt);
+                    });
+                } else {
+                    const opt = document.createElement('option');
+                    opt.value = 'default';
+                    opt.textContent = 'default';
+                    sel.appendChild(opt);
+                }
+            }
+        } catch (e) {
+            const sel = document.getElementById('repoGroupSelect');
+            sel.innerHTML = '<option value="default">default</option>';
+        }
+    }
     async function loadQueue() {
+        const repoGroup = document.getElementById('repoGroupSelect').value;
+        if (!repoGroup) return;
         const tbody = document.getElementById('queueBody');
         tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Loading...</td></tr>';
         try {
-            const resp = await apiRequest('/api/v1/queue/main');
-            if (!resp.ok) { tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">No items in queue</td></tr>'; return; }
+            const resp = await apiRequest('/api/v1/queue/' + repoGroup);
+            if (!resp.ok) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">No access or empty</td></tr>';
+                return;
+            }
             const items = await resp.json();
-            if (items.length === 0) { tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Queue is empty</td></tr>'; return; }
-            tbody.innerHTML = items.map(item => '<tr><td>#'+item.pr_id+'</td><td>'+escapeHtml(item.title||'PR #'+item.pr_id)+'</td><td class="status-'+escapeHtml(item.status)+'">'+escapeHtml(item.status)+'</td><td>'+((item.criteria&&item.criteria.approved_by)?item.criteria.approved_by.map(function(v){return escapeHtml(v)}).join(', '):'-')+'</td><td>'+(item.criteria?escapeHtml(item.criteria.ci_status):'-')+'</td><td>'+({'waiting':'<span style="color: #ffc107;">Waiting for conditions</span>','checking':'<span style="color: #17a2b8;">Checking...</span>','done':'<span style="color: #28a745;">Ready to merge</span>','failed':'<span style="color: #dc3545;">Failed</span>'}[item.status]||'')+'</td></tr>').join('');
-        } catch (e) { tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">No items in queue</td></tr>'; }
+            if (!Array.isArray(items) || items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Queue is empty</td></tr>';
+                return;
+            }
+            tbody.innerHTML = items.map(item => {
+                const statusText = {
+                    'waiting': '<span style="color: #ffc107;">Waiting for conditions</span>',
+                    'checking': '<span style="color: #17a2b8;">Checking...</span>',
+                    'done': '<span style="color: #28a745;">Ready to merge</span>',
+                    'failed': '<span style="color: #dc3545;">Failed: ' + escapeHtml(item.failure_reason || '') + '</span>'
+                }[item.status] || item.status;
+                
+                const approvals = (item.criteria && item.criteria.approved_by) 
+                    ? item.criteria.approved_by.map(v => escapeHtml(v)).join(', ') 
+                    : '-';
+                
+                const ciStatus = item.criteria ? escapeHtml(item.criteria.ci_status) : '-';
+                
+                return '<tr>' +
+                    '<td>#' + item.pr_id + '</td>' +
+                    '<td>' + escapeHtml(item.title || 'PR #' + item.pr_id) + '</td>' +
+                    '<td class="status-' + escapeHtml(item.status) + '">' + escapeHtml(item.status) + '</td>' +
+                    '<td>' + approvals + '</td>' +
+                    '<td>' + ciStatus + '</td>' +
+                    '<td>' + statusText + '</td>' +
+                    '</tr>';
+            }).join('');
+        } catch (e) {
+            console.error(e);
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">Failed to load queue: ' + e.message + '</td></tr>';
+        }
     }
     async function recheckQueue() {
-        try { const resp = await apiRequest('/api/v1/queue/main/recheck',{method:'POST'}); if(resp.ok){ alert('Queue recheck triggered!'); setTimeout(loadQueue,1000); } else { alert('Nothing to recheck'); } } catch(e){ alert('Nothing to recheck'); }
+        const repoGroup = document.getElementById('repoGroupSelect').value;
+        try {
+            const resp = await apiRequest('/api/v1/queue/' + repoGroup + '/recheck', {method:'POST'});
+            if(resp.ok){ alert('Queue recheck triggered!'); setTimeout(loadQueue, 1000); } 
+            else { alert('Nothing to recheck'); }
+        } catch(e){ alert('Failed to trigger recheck'); }
     }
-    loadQueue();
+    loadRepoGroups().then(() => loadQueue());
 </script>
 {{template "client_auth"}}
 </body>

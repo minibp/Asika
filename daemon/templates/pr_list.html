@@ -11,6 +11,12 @@
 <div class="container">
 <h1>PR List</h1>
 <div class="form-group">
+    <label>Repository Group:</label>
+    <select id="repoGroupSelect" onchange="loadPRs()">
+        <option value="default">default</option>
+    </select>
+</div>
+<div class="form-group">
     <label>Filter by state:</label>
     <select id="stateFilter" onchange="loadPRs()">
         <option value="open">Open</option>
@@ -42,21 +48,61 @@
 </div>
 {{template "scripts"}}
 <script>
+    async function loadRepoGroups() {
+        try {
+            const resp = await apiRequest('/api/v1/config');
+            if (resp.ok) {
+                const cfg = await resp.json();
+                const sel = document.getElementById('repoGroupSelect');
+                sel.innerHTML = '';
+                if (cfg.repo_groups && cfg.repo_groups.length > 0) {
+                    cfg.repo_groups.forEach(g => {
+                        const opt = document.createElement('option');
+                        opt.value = g.name;
+                        opt.textContent = g.name;
+                        sel.appendChild(opt);
+                    });
+                } else {
+                    const opt = document.createElement('option');
+                    opt.value = 'default';
+                    opt.textContent = 'default';
+                    sel.appendChild(opt);
+                }
+            }
+        } catch (e) {}
+    }
     async function loadPRs() {
+        const repoGroup = document.getElementById('repoGroupSelect').value;
         const state = document.getElementById('stateFilter').value;
         const tbody = document.getElementById('prTableBody');
         tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Loading...</td></tr>';
         try {
-            const resp = await apiRequest('/api/v1/repos/main/prs' + (state ? '?state=' + state : ''));
+            const resp = await apiRequest('/api/v1/repos/' + repoGroup + '/prs' + (state ? '?state=' + state : ''));
             const body = await resp.json();
             if (body.error) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #dc3545;">' + body.error + '</td></tr>'; return; }
             const prs = Array.isArray(body) ? body : (body.data || []);
             if (prs.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No PRs found</td></tr>'; return; }
-            tbody.innerHTML = prs.map(pr => '<tr><td>'+pr.pr_number+'</td><td><a href="/prs/'+pr.pr_number+'" style="color: #0066cc; text-decoration: none;">'+escapeHtml(pr.title)+'</a></td><td>'+escapeHtml(pr.author)+'</td><td>'+escapeHtml(pr.platform)+'</td><td class="status-'+escapeHtml(pr.state)+'">'+escapeHtml(pr.state)+'</td><td>'+(pr.labels||[]).map(l=>'<span class="label">'+escapeHtml(l)+'</span>').join('')+'</td><td>'+(pr.state==='open'?'<button class="btn btn-success" onclick="approvePR('+pr.pr_number+')" style="padding: 4px 8px; font-size: 12px;">Approve</button> <button class="btn btn-danger" onclick="closePR('+pr.pr_number+')" style="padding: 4px 8px; font-size: 12px;">Close</button>':'')+'</td></tr>').join('');
+            tbody.innerHTML = prs.map(pr => {
+                let actions = '';
+                if (pr.state === 'open') {
+                    if (!pr.is_approved) {
+                        actions += '<button class="btn btn-success" onclick="approvePR('+pr.pr_number+')" style="padding: 4px 8px; font-size: 12px;">Approve</button> ';
+                    } else {
+                        actions += '<span style="color: #28a745; font-size: 12px; padding: 4px 8px;">✓ Approved</span> ';
+                    }
+                    actions += '<button class="btn btn-danger" onclick="closePR('+pr.pr_number+')" style="padding: 4px 8px; font-size: 12px;">Close</button>';
+                }
+                return '<tr><td>'+pr.pr_number+'</td><td><a href="/prs/'+pr.pr_number+'" style="color: #0066cc; text-decoration: none;">'+escapeHtml(pr.title)+'</a></td><td>'+escapeHtml(pr.author)+'</td><td>'+(pr.html_url?'<a href="'+escapeHtml(pr.html_url)+'" target="_blank" title="View on platform">'+escapeHtml(pr.platform)+' ↗</a>':escapeHtml(pr.platform))+'</td><td class="status-'+escapeHtml(pr.state)+'">'+escapeHtml(pr.state)+'</td><td>'+(pr.labels||[]).map(l=>'<span class="label">'+escapeHtml(l)+'</span>').join('')+'</td><td>'+actions+'</td></tr>';
+            }).join('');
             } catch (e) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No PRs found</td></tr>'; }
         }
-    async function approvePR(n) { if(confirm('Approve PR #'+n+'?')){ await apiRequest('/api/v1/repos/main/prs/'+n+'/approve',{method:'POST'}); loadPRs(); } }
-    async function closePR(n) { if(confirm('Close PR #'+n+'?')){ await apiRequest('/api/v1/repos/main/prs/'+n+'/close',{method:'POST'}); loadPRs(); } }
+    async function approvePR(n) {
+        const repoGroup = document.getElementById('repoGroupSelect').value;
+        if(confirm('Approve PR #'+n+'?')){ await apiRequest('/api/v1/repos/'+repoGroup+'/prs/'+n+'/approve',{method:'POST'}); loadPRs(); } }
+    async function closePR(n) {
+        const repoGroup = document.getElementById('repoGroupSelect').value;
+        if(confirm('Close PR #'+n+'?')){ await apiRequest('/api/v1/repos/'+repoGroup+'/prs/'+n+'/close',{method:'POST'}); loadPRs(); } }
+    loadRepoGroups();
     loadPRs();
 </script>
 {{template "client_auth"}}

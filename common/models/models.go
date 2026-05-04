@@ -42,6 +42,8 @@ type PRRecord struct {
 	Events         []PREvent `json:"events"`
 	IsDraft        bool      `json:"is_draft"` // true if PR is a draft (GitHub) or WIP (GitLab)
 	HasConflict    bool      `json:"has_conflict"` // true if PR has merge conflicts
+	IsApproved     bool      `json:"is_approved"` // true if PR has been approved by at least one reviewer
+	HTMLURL        string    `json:"html_url"`    // URL to the PR on the platform
 }
 
 // PREvent represents a pull request event

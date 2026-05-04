@@ -35,32 +35,71 @@
 </div>
 {{template "scripts"}}
 <script>
+    let repoGroupsList = [];
+
+    async function loadRepoGroups() {
+        try {
+            const resp = await apiRequest('/api/v1/config');
+            if (resp.ok) {
+                const cfg = await resp.json();
+                if (cfg.repo_groups) {
+                    repoGroupsList = cfg.repo_groups.map(g => g.name);
+                }
+                if (cfg.single_repo && cfg.single_repo.repo && repoGroupsList.length === 0) {
+                    repoGroupsList = ['default'];
+                }
+                if (repoGroupsList.length === 0) {
+                    repoGroupsList = ['default'];
+                }
+            }
+        } catch (e) {
+            repoGroupsList = ['default'];
+        }
+    }
+
     async function loadDashboard() {
         try {
-            const resp = await apiRequest('/api/v1/repos/main/prs?state=open');
-            const body = await resp.json();
-            const prs = Array.isArray(body) ? body : (body.data || []);
-            document.getElementById('openPRs').textContent = prs.length;
+            await loadRepoGroups();
+            document.getElementById('repoGroups').textContent = repoGroupsList.length;
 
-            let staleCount = 0;
-            for (const pr of prs) {
-                if (pr.labels && pr.labels.includes('stale')) staleCount++;
-            }
-            document.getElementById('stalePRs').textContent = staleCount;
+            let totalOpen = 0;
+            let totalStale = 0;
 
-            const qResp = await apiRequest('/api/v1/queue/main');
-            if (qResp.ok) {
-                const queue = await qResp.json();
-                document.getElementById('queueItems').textContent = queue.length;
+            for (const group of repoGroupsList) {
+                try {
+                    const resp = await apiRequest('/api/v1/repos/' + group + '/prs?state=open');
+                    if (resp.ok) {
+                        const body = await resp.json();
+                        const prs = Array.isArray(body) ? body : (body.data || []);
+                        totalOpen += prs.length;
+                        for (const pr of prs) {
+                            if (pr.labels && pr.labels.includes('stale')) totalStale++;
+                        }
+                    }
+                } catch (e) {}
             }
-            document.getElementById('repoGroups').textContent = '1';
+
+            document.getElementById('openPRs').textContent = totalOpen;
+            document.getElementById('stalePRs').textContent = totalStale;
+
+            let totalQueue = 0;
+            for (const group of repoGroupsList) {
+                try {
+                    const qResp = await apiRequest('/api/v1/queue/' + group);
+                    if (qResp.ok) {
+                        const items = await qResp.json();
+                        if (Array.isArray(items)) totalQueue += items.length;
+                    }
+                } catch (e) {}
+            }
+            document.getElementById('queueItems').textContent = totalQueue;
 
             const logResp = await apiRequest('/api/v1/logs');
             const act = document.getElementById('activity');
             if (logResp.ok) {
                 const logs = await logResp.json();
                 if (logs.length === 0) {
-act.innerHTML = '<p style="color:#666">No recent activity</p>';
+                    act.innerHTML = '<p style="color:#666">No recent activity</p>';
                 } else {
                     act.innerHTML = logs.slice(0, 10).map(l =>
                         '<div class="activity-item">' +

@@ -1,6 +1,13 @@
 # ChangeLog for Asika
 
-## v20260504DEV
+## v20260505DEV
+- Fix merge queue deadlock: move db.Delete outside read transaction in CheckQueue
+- Fix approval deduplication in merge queue criteria (same user counted multiple times)
+- Fix merge method detection: use GetDefaultMergeMethod instead of defaulting to merge
+- Fix PR list API performance: read from local DB instead of remote GitHub API (800ms -> <1ms)
+- Fix webhook handler: add pull_request_review event parsing for GitHub approve events
+- Add transient error retry logic for approval/CI checks (3 attempts, keeps items as waiting)
+- Add automatic cleanup of completed (done) merge queue items
 - Fix self-update endpoint returning 500 error (github.NewClient(nil) fixed with proper auth)
 - Add webhook retry mechanism with exponential backoff (max 10 attempts)
 - Add audit logging system with API endpoint GET /api/v1/logs
@@ -16,7 +23,10 @@
 - Update asika.toml.example with Discord and Gitea @ notification config
 - Improve error handling: return 502 when platform client unavailable instead of silent empty response
 - Add fallback to 'default' repo group when requested group not found
-
-## v20260503DEV
-- Inital commit
-- 75% function supported
+- Add telegram.bot and feishu bot support
+- Add cli
+- Fix webui not work
+- Added initialization page
+- Adapted the web UI for mobile pages
+- Add basic webui
+- Inital version

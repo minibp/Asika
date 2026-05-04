@@ -93,12 +93,15 @@ func handleResponse(resp *http.Response, emptyMsg string) []interface{} {
 				fmt.Println(msg)
 				return nil
 			}
+			if d, ok := obj["data"].([]interface{}); ok {
+				data = d
+			}
 		}
-		fmt.Println(emptyMsg)
-		return nil
-	}
-
-	if len(data) == 0 {
+		if len(data) == 0 {
+			fmt.Println(emptyMsg)
+			return nil
+		}
+	} else if len(data) == 0 {
 		fmt.Println(emptyMsg)
 		return nil
 	}

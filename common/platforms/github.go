@@ -50,6 +50,7 @@ func (c *GitHubClient) GetPR(ctx context.Context, owner, repo string, number int
 		UpdatedAt:      pr.GetUpdatedAt().Time,
 		Events:         []models.PREvent{},
 		HasConflict:    !pr.GetMergeable(),
+		HTMLURL:        pr.GetHTMLURL(),
 	}
 	return record, nil
 }
@@ -83,6 +84,7 @@ func (c *GitHubClient) ListPRs(ctx context.Context, owner, repo string, state st
 				UpdatedAt:      pr.GetUpdatedAt().Time,
 				Events:         []models.PREvent{},
 				IsDraft:        pr.GetDraft(),
+				HTMLURL:        pr.GetHTMLURL(),
 			}
 			result = append(result, record)
 		}
@@ -126,9 +128,12 @@ func (c *GitHubClient) MergePR(ctx context.Context, owner, repo string, number i
 		MergeMethod: mergeMethod,
 	}
 
-	_, _, err := c.client.PullRequests.Merge(ctx, owner, repo, number, "", opts)
+	result, _, err := c.client.PullRequests.Merge(ctx, owner, repo, number, "", opts)
 	if err != nil {
 		return fmt.Errorf("failed to merge PR: %w", err)
+	}
+	if !result.GetMerged() {
+		return fmt.Errorf("merge returned merged=false, message: %s", result.GetMessage())
 	}
 	return nil
 }

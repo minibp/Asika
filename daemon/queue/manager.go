@@ -76,43 +76,83 @@ func (m *Manager) AddToQueue(pr *models.PRRecord) error {
 
 // CheckQueue checks all items in the queue
 func (m *Manager) CheckQueue() {
+	// First, read all items and collect done keys for cleanup
+	var items []models.QueueItem
+	var keys []string
+	var doneKeys []string
 	err := db.ForEach(db.BucketQueueItems, func(key, value []byte) error {
 		var item models.QueueItem
 		if err := json.Unmarshal(value, &item); err != nil {
 			return err
 		}
-
-		if item.Status != "waiting" && item.Status != "checking" {
+		// Collect completed items for cleanup
+		if item.Status == "done" {
+			doneKeys = append(doneKeys, string(key))
 			return nil
 		}
+		// Process waiting, checking, and failed items (failed items can be retried)
+		if item.Status != "waiting" && item.Status != "checking" && item.Status != "failed" {
+			return nil
+		}
+		items = append(items, item)
+		keys = append(keys, string(key))
+		return nil
+	})
+	if err != nil {
+		slog.Error("failed to read queue items", "error", err)
+		return
+	}
 
-		// Update status to checking
+	// Clean up completed items outside the read transaction
+	for _, dk := range doneKeys {
+		slog.Info("removing completed item from queue", "pr_id", dk)
+		if delErr := db.Delete(db.BucketQueueItems, dk); delErr != nil {
+			slog.Error("failed to remove completed queue item", "error", delErr)
+		}
+	}
+
+	// Process items outside any db transaction
+	for i, item := range items {
 		item.Status = "checking"
 		item.LastChecked = time.Now()
 
 		shouldMerge, err := m.checker.ShouldMerge(&item)
 		if err != nil {
-			slog.Error("check failed", "error", err, "pr_id", item.PRID)
-			item.Status = "failed"
-			item.FailureReason = err.Error()
+			if isTransientError(err) {
+				slog.Warn("transient check error, keeping as waiting", "error", err, "pr_id", item.PRID)
+				item.Status = "waiting"
+			} else {
+				slog.Error("check failed", "error", err, "pr_id", item.PRID)
+				item.Status = "failed"
+				item.FailureReason = err.Error()
+			}
+			updated, _ := json.Marshal(item)
+			if putErr := db.Put(db.BucketQueueItems, keys[i], updated); putErr != nil {
+				slog.Error("failed to update queue item", "error", putErr, "pr_id", item.PRID)
+			}
 		} else if shouldMerge {
 			item.Status = "merging"
 			if err := m.merge(&item); err != nil {
 				item.Status = "failed"
 				item.FailureReason = err.Error()
+				updated, _ := json.Marshal(item)
+				if putErr := db.Put(db.BucketQueueItems, keys[i], updated); putErr != nil {
+					slog.Error("failed to update queue item", "error", putErr, "pr_id", item.PRID)
+				}
 			} else {
 				item.Status = "done"
+				slog.Info("removing completed item from queue", "pr_id", item.PRID)
+				if delErr := db.Delete(db.BucketQueueItems, keys[i]); delErr != nil {
+					slog.Error("failed to remove completed queue item", "error", delErr, "pr_id", item.PRID)
+				}
 			}
 		} else {
 			item.Status = "waiting"
+			updated, _ := json.Marshal(item)
+			if putErr := db.Put(db.BucketQueueItems, keys[i], updated); putErr != nil {
+				slog.Error("failed to update queue item", "error", putErr, "pr_id", item.PRID)
+			}
 		}
-
-		updated, _ := json.Marshal(item)
-		return db.Put(db.BucketQueueItems, string(key), updated)
-	})
-
-	if err != nil {
-		slog.Error("failed to check queue", "error", err)
 	}
 }
 
@@ -144,14 +184,20 @@ func (m *Manager) merge(item *models.QueueItem) error {
 	}
 
 	// Determine merge method
-	method := ""
-	hasMultiple, err := client.HasMultipleMergeMethods(ctx, owner, repo)
-	if err == nil && hasMultiple {
-		method, _ = client.GetDefaultMergeMethod(ctx, owner, repo)
+	method, err := client.GetDefaultMergeMethod(ctx, owner, repo)
+	if err != nil {
+		slog.Warn("failed to get default merge method, using default", "error", err)
+		method = "merge"
 	}
 
-	slog.Info("merging PR", "pr_id", pr.ID, "platform", pr.Platform, "method", method)
-	return client.MergePR(ctx, owner, repo, pr.PRNumber, method)
+	slog.Info("merging PR", "pr_id", pr.ID, "pr_number", pr.PRNumber, "platform", pr.Platform, "method", method)
+	err = client.MergePR(ctx, owner, repo, pr.PRNumber, method)
+	if err != nil {
+		slog.Error("merge failed", "pr_id", pr.ID, "error", err)
+	} else {
+		slog.Info("merge succeeded", "pr_id", pr.ID)
+	}
+	return err
 }
 
 // findPRByID finds a PR by its ID in bbolt
@@ -193,7 +239,7 @@ func (m *Manager) GetQueueItems(repoGroup string) ([]models.QueueItem, error) {
 		if err := json.Unmarshal(value, &item); err != nil {
 			return err
 		}
-		if strings.HasPrefix(string(key), repoGroup+"#") || strings.HasPrefix(string(key), repoGroup) {
+		if item.RepoGroup == repoGroup || strings.HasPrefix(string(key), repoGroup+"#") {
 			items = append(items, item)
 		}
 		return nil

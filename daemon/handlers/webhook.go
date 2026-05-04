@@ -134,6 +134,67 @@ func parseWebhookEvent(platform string, body []byte, repoGroup string) (string, 
 
 // parseGitHubWebhook parses GitHub webhook payload
 func parseGitHubWebhook(body []byte, repoGroup string) (string, *models.PRRecord, error) {
+	// Check if this is a pull_request_review event (for approvals)
+	var reviewPayload struct {
+		Action      string `json:"action"`
+		Review      struct {
+			State string `json:"state"`
+			User  struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		} `json:"review"`
+		PullRequest struct {
+			Number  int    `json:"number"`
+			Title   string `json:"title"`
+			State   string `json:"state"`
+			Merged  bool   `json:"merged"`
+			Draft   bool   `json:"draft"`
+			HTMLURL string `json:"html_url"`
+			User    struct {
+				Login string `json:"login"`
+			} `json:"user"`
+			Head struct {
+				Sha string `json:"sha"`
+			} `json:"head"`
+			Base struct {
+				Ref string `json:"ref"`
+			} `json:"base"`
+			Labels []struct {
+				Name string `json:"name"`
+			} `json:"labels"`
+		} `json:"pull_request"`
+		Repository struct {
+			FullName string `json:"full_name"`
+		} `json:"repository"`
+	}
+
+	if err := json.Unmarshal(body, &reviewPayload); err == nil && reviewPayload.Review.State != "" {
+		// This is a pull_request_review event
+		pr := &models.PRRecord{
+			Platform:  "github",
+			PRNumber:  reviewPayload.PullRequest.Number,
+			Title:     reviewPayload.PullRequest.Title,
+			Author:    reviewPayload.PullRequest.User.Login,
+			State:     reviewPayload.PullRequest.State,
+			RepoGroup: repoGroup,
+			IsDraft:   reviewPayload.PullRequest.Draft,
+		}
+
+		if reviewPayload.PullRequest.Merged {
+			pr.State = "merged"
+		}
+
+		for _, lbl := range reviewPayload.PullRequest.Labels {
+			pr.Labels = append(pr.Labels, lbl.Name)
+		}
+
+		if reviewPayload.Review.State == "approved" {
+			return string(events.EventPRApproved), pr, nil
+		}
+		return "", pr, nil
+	}
+
+	// Regular pull_request event
 	var payload struct {
 		Action      string `json:"action"`
 		PullRequest struct {

@@ -34,13 +34,13 @@ func GetQueue(c *gin.Context) {
 		return
 	}
 
-	// Get queue items from DB
+	// Get queue items from DB - match by item.RepoGroup field or legacy key prefix
 	err := db.ForEach(db.BucketQueueItems, func(key, value []byte) error {
 		var item models.QueueItem
 		if err := json.Unmarshal(value, &item); err != nil {
 			return nil
 		}
-		if strings.HasPrefix(string(key), repoGroup+"#") {
+		if item.RepoGroup == repoGroup || strings.HasPrefix(string(key), repoGroup+"#") {
 			items = append(items, item)
 		}
 		return nil

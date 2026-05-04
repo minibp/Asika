@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -72,12 +73,15 @@ func main() {
         return
     }
 
-    // Initialize database
-    if err := db.Init(cfg.Database.Path); err != nil {
+    // Initialize database with retry (handles stale lock from ungraceful shutdown)
+    if err := dbInitWithRetry(cfg.Database.Path, 5); err != nil {
         slog.Error("failed to initialize database", "error", err)
         os.Exit(1)
     }
     defer db.Close()
+
+    // Migrate old DB records (repo group name changes, e.g. "main" -> "default")
+    migrateRepoGroupNames(cfg)
 
     // Initialize auth
     auth.Init(cfg.Auth.JWTSecret, config.GenerateTokenExpiry(cfg.Auth.TokenExpiry))
@@ -160,6 +164,9 @@ func main() {
 	// Create and start server
 	srv := server.NewServer(cfg, clients)
 
+	// Setup shutdown handler after server is created
+	sigChan := setupShutdownHandler()
+
 	slog.Info("Asika daemon starting")
 	slog.Info("Copyright (R) 2026 The minibp developers. All rights reserved")
 
@@ -178,10 +185,23 @@ func main() {
 		}()
 	}
 
-	if err := srv.Start(); err != nil {
-		slog.Error("server failed", "error", err)
-		os.Exit(1)
+	// Start server in background so we can handle shutdown signals
+	go func() {
+		if err := srv.Start(); err != nil {
+			slog.Error("server failed", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Wait for shutdown signal
+	sig := <-sigChan
+	slog.Info("received signal, shutting down", "signal", sig)
+	if err := srv.Stop(); err != nil {
+		slog.Error("server stop error", "error", err)
 	}
+	db.Close()
+	slog.Info("shutdown complete")
+	os.Exit(0)
 }
 
 // setupSIGHUPHandler sets up SIGHUP signal handler for hot reload
@@ -201,6 +221,28 @@ func setupSIGHUPHandler() {
             slog.Info("config reloaded successfully")
         }
     }()
+}
+
+// setupShutdownHandler handles SIGINT/SIGTERM for graceful shutdown
+func setupShutdownHandler() chan os.Signal {
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+    return sigChan
+}
+
+// dbInitWithRetry initializes DB with retries for lock conflicts
+func dbInitWithRetry(dbPath string, maxRetries int) error {
+    for i := 0; i < maxRetries; i++ {
+        err := db.Init(dbPath)
+        if err == nil {
+            return nil
+        }
+        if i < maxRetries-1 {
+            slog.Warn("db init failed, retrying", "attempt", i+1, "max", maxRetries, "error", err)
+            time.Sleep(2 * time.Second)
+        }
+    }
+    return db.Init(dbPath)
 }
 
 // parseDurationDefault parses a duration with a fallback
@@ -245,8 +287,6 @@ func startTelegramBot(
 			}
 			telegramNotifier = notifier.NewTelegramNotifier(cfgMap)
 			if telegramNotifier != nil && telegramNotifier.Bot() == nil {
-				// Inject our bot instance
-				// We need to create it with the bot we already have
 				_ = telegramNotifier
 			}
 			break
@@ -333,4 +373,90 @@ func serverURL(listen string) string {
 		host = "[" + host + "]"
 	}
 	return fmt.Sprintf("http://%s:%s", host, port)
+}
+
+// migrateRepoGroupNames updates old DB records when repo group name changed (e.g. "main" -> "default")
+func migrateRepoGroupNames(cfg *models.Config) {
+	if len(cfg.RepoGroups) == 0 {
+		return
+	}
+	currentName := cfg.RepoGroups[0].Name
+
+	// Collect known repo group names from config
+	validNames := make(map[string]bool)
+	for _, rg := range cfg.RepoGroups {
+		validNames[rg.Name] = true
+	}
+
+	// Migrate PR records
+	var prKeysToDelete []string
+	var prsToReinsert []struct {
+		key     string
+		value   []byte
+		pr      models.PRRecord
+		newKey  string
+	}
+	_ = db.ForEach(db.BucketPRs, func(key, value []byte) error {
+		var pr models.PRRecord
+		if json.Unmarshal(value, &pr) != nil {
+			return nil
+		}
+		if !validNames[pr.RepoGroup] {
+			pr.RepoGroup = currentName
+			newKey := currentName + "#" + pr.ID
+			updated, _ := json.Marshal(pr)
+			prsToReinsert = append(prsToReinsert, struct {
+				key     string
+				value   []byte
+				pr      models.PRRecord
+				newKey  string
+			}{string(key), updated, pr, newKey})
+			prKeysToDelete = append(prKeysToDelete, string(key))
+			slog.Info("migrating PR record", "old_key", string(key), "new_key", newKey, "pr_id", pr.ID)
+		}
+		return nil
+	})
+	for _, item := range prsToReinsert {
+		db.PutPRWithIndex(item.newKey, item.value, item.pr.ID, item.pr.RepoGroup, item.pr.PRNumber)
+	}
+	for _, k := range prKeysToDelete {
+		db.Delete(db.BucketPRs, k)
+	}
+
+	// Migrate queue items
+	var qiKeysToDelete []string
+	var qisToReinsert []struct {
+		key    string
+		value  []byte
+		newKey string
+	}
+	_ = db.ForEach(db.BucketQueueItems, func(key, value []byte) error {
+		var item models.QueueItem
+		if json.Unmarshal(value, &item) != nil {
+			return nil
+		}
+		if !validNames[item.RepoGroup] {
+			item.RepoGroup = currentName
+			newKey := currentName + "#" + item.PRID
+			updated, _ := json.Marshal(item)
+			qisToReinsert = append(qisToReinsert, struct {
+				key    string
+				value  []byte
+				newKey string
+			}{string(key), updated, newKey})
+			qiKeysToDelete = append(qiKeysToDelete, string(key))
+			slog.Info("migrating queue item", "old_key", string(key), "new_key", newKey, "pr_id", item.PRID)
+		}
+		return nil
+	})
+	for _, item := range qisToReinsert {
+		db.Put(db.BucketQueueItems, item.newKey, item.value)
+	}
+	for _, k := range qiKeysToDelete {
+		db.Delete(db.BucketQueueItems, k)
+	}
+
+	if len(prsToReinsert)+len(qisToReinsert) > 0 {
+		slog.Info("repo group migration complete", "prs_migrated", len(prsToReinsert), "queue_items_migrated", len(qisToReinsert))
+	}
 }

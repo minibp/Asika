@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"asika/common/config"
 	"asika/common/db"
@@ -26,6 +27,19 @@ func NewChecker(cfg *models.Config, clients map[platforms.PlatformType]platforms
 	}
 }
 
+// TransientError indicates a temporary error that should be retried
+type TransientError struct {
+	Err error
+}
+
+func (e *TransientError) Error() string {
+	return fmt.Sprintf("transient error: %v", e.Err)
+}
+
+func (e *TransientError) Unwrap() error {
+	return e.Err
+}
+
 // ShouldMerge checks if a queue item should be merged
 func (c *Checker) ShouldMerge(item *models.QueueItem) (bool, error) {
 	ctx := context.Background()
@@ -35,7 +49,7 @@ func (c *Checker) ShouldMerge(item *models.QueueItem) (bool, error) {
 		return false, err
 	}
 
-	// Get repo group config
+	// Get repo group config - falls back to "default" if name not found
 	group := config.GetRepoGroupByName(c.cfg, pr.RepoGroup)
 	if group == nil {
 		return false, fmt.Errorf("repo group not found: %s", pr.RepoGroup)
@@ -47,7 +61,7 @@ func (c *Checker) ShouldMerge(item *models.QueueItem) (bool, error) {
 		return false, nil
 	}
 
-	// Check approvals
+	// Check approvals with retry for transient errors
 	approved, approvals, err := c.checkApprovals(ctx, pr, group)
 	if err != nil {
 		return false, err
@@ -56,11 +70,11 @@ func (c *Checker) ShouldMerge(item *models.QueueItem) (bool, error) {
 		return false, nil
 	}
 
-	// Check CI (skip if ci_check_required is false or ci_provider is "none")
-	if group.MergeQueue.CICheckRequired && group.CIProvider != "none" {
+	// Check CI (skip if ci_check_required is false or ci_provider is "none"/empty)
+	if group.MergeQueue.CICheckRequired && group.CIProvider != "none" && group.CIProvider != "" {
 		ciPassed, ciStatus, err := c.checkCI(ctx, pr, group)
 		if err != nil {
-			return false, err
+			return false, &TransientError{Err: err}
 		}
 		if !ciPassed {
 			// Update criteria snapshot
@@ -95,16 +109,37 @@ func (c *Checker) checkApprovals(ctx context.Context, pr *models.PRRecord, group
 		return false, nil, fmt.Errorf("cannot resolve repo for platform %s in group %s", pr.Platform, group.Name)
 	}
 
-	approvals, err := client.GetApprovals(ctx, owner, repo, pr.PRNumber)
+	// Retry transient network errors
+	var approvals []string
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		approvals, err = client.GetApprovals(ctx, owner, repo, pr.PRNumber)
+		if err == nil {
+			break
+		}
+		if !isTransientError(err) {
+			return false, nil, err
+		}
+		if attempt < 2 {
+			slog.Warn("transient error fetching approvals, retrying", "pr_id", pr.ID, "attempt", attempt+1, "error", err)
+		}
+	}
 	if err != nil {
-		return false, nil, err
+		return false, nil, &TransientError{Err: err}
 	}
 
 	// Check if core contributors approved
+	// If core_contributors list is empty, allow any approval
 	coreApproved := make([]string, 0)
+	isCoreListEmpty := len(group.MergeQueue.CoreContributors) == 0
+	seen := make(map[string]bool)
 	for _, approver := range approvals {
-		if contains(group.MergeQueue.CoreContributors, approver) {
+		if seen[approver] {
+			continue
+		}
+		if isCoreListEmpty || contains(group.MergeQueue.CoreContributors, approver) {
 			coreApproved = append(coreApproved, approver)
+			seen[approver] = true
 		}
 	}
 
@@ -126,7 +161,7 @@ func (c *Checker) checkCI(ctx context.Context, pr *models.PRRecord, group *model
 	// Get the latest commit SHA from the PR
 	commits, err := client.GetPRCommits(ctx, owner, repo, pr.PRNumber)
 	if err != nil {
-		return false, "none", err
+		return false, "none", &TransientError{Err: err}
 	}
 	if len(commits) == 0 {
 		return true, "none", nil
@@ -135,32 +170,47 @@ func (c *Checker) checkCI(ctx context.Context, pr *models.PRRecord, group *model
 	lastCommit := commits[len(commits)-1]
 	status, err := client.GetCIStatus(ctx, owner, repo, lastCommit)
 	if err != nil {
-		return false, "none", err
+		return false, "none", &TransientError{Err: err}
 	}
 
 	return status == "success", status, nil
 }
 
+// isTransientError checks if an error is likely temporary
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "unexpected EOF") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "temporary failure") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "EOF")
+}
+
 func getPRFromDB(repoGroup, prID string) (*models.PRRecord, error) {
-	// Try to find PR by iterating through the bucket
 	var pr *models.PRRecord
 	err := db.ForEach(db.BucketPRs, func(key, value []byte) error {
 		var record models.PRRecord
 		if err := json.Unmarshal(value, &record); err != nil {
 			return err
 		}
-		if record.RepoGroup == repoGroup && record.ID == prID {
+		if record.ID == prID {
 			pr = &record
 			return nil
 		}
-		// Also try matching by PR number as key format is repoGroup#platform#prNumber
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	if pr == nil {
-		return nil, fmt.Errorf("PR not found: %s/%s", repoGroup, prID)
+		return nil, fmt.Errorf("PR not found: %s", prID)
 	}
 	return pr, nil
 }
