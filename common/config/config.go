@@ -170,6 +170,7 @@ func GetRepoGroups(cfg *models.Config) []models.RepoGroup {
 
 // GetRepoGroupByName finds a repo group by name
 func GetRepoGroupByName(cfg *models.Config, name string) *models.RepoGroup {
+    var defaultGroup *models.RepoGroup
     for i := range cfg.RepoGroups {
         rg := &cfg.RepoGroups[i]
         mode := rg.Mode
@@ -190,6 +191,24 @@ func GetRepoGroupByName(cfg *models.Config, name string) *models.RepoGroup {
                 MergeQueue:     rg.MergeQueue,
             }
         }
+        if rg.Name == "default" {
+            defaultGroup = &models.RepoGroup{
+                Name:           rg.Name,
+                Mode:           mode,
+                MirrorPlatform: rg.MirrorPlatform,
+                GitHub:         rg.GitHub,
+                GitLab:         rg.GitLab,
+                Gitea:          rg.Gitea,
+                DefaultBranch:  rg.DefaultBranch,
+                HookPath:       rg.HookPath,
+                CIProvider:     rg.CIProvider,
+                MergeQueue:     rg.MergeQueue,
+            }
+        }
+    }
+    if defaultGroup != nil {
+        slog.Info("repo group not found, falling back to default", "requested", name)
+        return defaultGroup
     }
     return nil
 }

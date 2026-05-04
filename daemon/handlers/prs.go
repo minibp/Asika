@@ -58,7 +58,7 @@ func ListPRs(c *gin.Context) {
 	// Get platform client
 	client := getClientForGroup(group, platform)
 	if client == nil {
-		c.JSON(http.StatusOK, records)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": platform})
 		return
 	}
 
@@ -299,7 +299,7 @@ func ApprovePR(c *gin.Context) {
 
 	client := getClientForGroup(group, pr.Platform)
 	if client == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform client available"})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
 		return
 	}
 
@@ -360,7 +360,7 @@ func ClosePR(c *gin.Context) {
 
 	client := getClientForGroup(group, pr.Platform)
 	if client == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform client available"})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
 		return
 	}
 
@@ -421,7 +421,7 @@ func ReopenPR(c *gin.Context) {
 
 	client := getClientForGroup(group, pr.Platform)
 	if client == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform client available"})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
 		return
 	}
 
@@ -482,7 +482,7 @@ func MarkSpam(c *gin.Context) {
 
 	client := getClientForGroup(group, pr.Platform)
 	if client == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform client available"})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
 		return
 	}
 
@@ -561,7 +561,7 @@ func CommentPR(c *gin.Context) {
 
 	client := getClientForGroup(group, pr.Platform)
 	if client == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no platform client available"})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "platform client not available (check token configuration)", "platform": pr.Platform})
 		return
 	}
 
