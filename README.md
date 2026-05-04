@@ -37,8 +37,18 @@ Download from [releases](https://github.com/minibp/asika/releases) or build it:
 ```bash
 git clone https://github.com/minibp/asika.git
 cd asika
+
+# Build with strip (default, version: YYYYMMDDDEV)
 bash build.sh
+
+# Or use specific commands:
+bash build.sh build    # Build binaries (default, stripped)
+bash build.sh dep      # Download dependencies
+bash build.sh clean    # Remove build artifacts
+bash build.sh distclean # Deep clean (includes Go cache)
 ```
+
+Binaries: `asika` (CLI) and `asikad` (daemon). Version is auto-generated from date.
 
 ### 2. Configure
 
@@ -114,6 +124,25 @@ recheck my-project    → Trigger recheck
 config                → Show config
 help                  → All commands
 ```
+
+### Discord
+
+Use slash commands or prefix commands in your Discord server:
+
+```
+!prs my-project        → List PRs
+!pr my-project 42      → Show PR #42
+!approve my-project 42 → Approve
+!close my-project 42   → Close
+!reopen my-project 42  → Reopen
+!spam my-project 42    → Mark as spam
+!queue my-project      → Check merge queue
+!recheck my-project    → Trigger recheck
+!config                → Show config summary
+!help                  → All commands
+```
+
+Or use Discord slash commands: `/prs`, `/pr`, `/approve`, `/close`, `/spam`, `/queue`, etc.
 
 ## CLI Cheatsheet
 All commands need a token: `asika --token <token>` or set `ASIKA_TOKEN`.
