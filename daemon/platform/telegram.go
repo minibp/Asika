@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -132,17 +133,17 @@ func (b *TelegramBot) handleStart(c telebot.Context) error {
 	username := c.Sender().Username
 
 	msg := fmt.Sprintf(
-		"*Welcome to Asika Bot* \n\nHello @%s (ID: %d)\n\nUse /help to see available commands.\n",
-		username, userID,
+		"<b>Welcome to Asika Bot</b>\n\nHello @%s (ID: %d)\n\nUse /help to see available commands.\n",
+		html.EscapeString(username), userID,
 	)
 
 	if b.isAdmin(c) {
 		msg += "You have admin privileges."
 	} else {
-		msg += "Access is currently unrestricted. Configure `admin_ids` in bot config to restrict access."
+		msg += "Access is currently unrestricted. Configure admin_ids in bot config to restrict access."
 	}
 
-	return c.Send(msg, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	return c.Send(msg, &telebot.SendOptions{ParseMode: telebot.ModeHTML})
 }
 
 // handleHelp handles /help command.
@@ -151,24 +152,28 @@ func (b *TelegramBot) handleHelp(c telebot.Context) error {
 		return nil
 	}
 
-	help := `*Asika Bot Commands*
+	help := `<b>Asika Bot Commands</b>
 
-📋 *PR Management*
-/prs [repo_group] — List PRs
-/pr <repo_group> <number> — Show PR details
-/approve <repo_group> <pr_id> — Approve a PR
-/close <repo_group> <pr_id> — Close a PR
-/reopen <repo_group> <pr_id> — Reopen a PR (spam recovery)
-/spam <repo_group> <pr_id> — Mark PR as spam
+📋 <b>PR Management</b>
+/prs repo_group — List PRs
+/pr repo_group number — Show PR details
+/approve repo_group pr_id — Approve a PR
+/close repo_group pr_id — Close a PR
+/reopen repo_group pr_id — Reopen a PR (spam recovery)
+/spam repo_group pr_id — Mark PR as spam
 
-📊 *Queue*
-/queue [repo_group] — Show merge queue
-/recheck <repo_group> — Trigger queue recheck
+📊 <b>Queue</b>
+/queue repo_group — Show merge queue
+/recheck repo_group — Trigger queue recheck
 
-⚙️ *Config*
-/config — Show current config (masked)`
+⚙️ <b>Config</b>
+/config — Show current config (masked)
 
-	return c.Send(help, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+🧹 <b>Stale PRs</b>
+/stale repo_group — Show stale PRs
+/unstale repo_group pr_number — Remove stale label`
+
+	return c.Send(help, &telebot.SendOptions{ParseMode: telebot.ModeHTML})
 }
 
 // handleListPRs handles /prs command.
@@ -203,12 +208,12 @@ func (b *TelegramBot) handleListPRs(c telebot.Context) error {
 	})
 
 	if len(prs) == 0 {
-		return c.Send(fmt.Sprintf("No PRs found for repo group *%s*.", repoGroup),
-			&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+		return c.Send(fmt.Sprintf("No PRs found for repo group <b>%s</b>.", html.EscapeString(repoGroup)),
+			&telebot.SendOptions{ParseMode: telebot.ModeHTML})
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("*PRs in %s*\n\n", repoGroup))
+	sb.WriteString(fmt.Sprintf("<b>PRs in %s</b>\n\n", html.EscapeString(repoGroup)))
 	for _, pr := range prs {
 		statusEmoji := "🔵"
 		switch pr.State {
@@ -219,11 +224,11 @@ func (b *TelegramBot) handleListPRs(c telebot.Context) error {
 		case "spam":
 			statusEmoji = "⚠️"
 		}
-		sb.WriteString(fmt.Sprintf("%s *#%d* %s — by %s (%s/%s)\n",
-			statusEmoji, pr.PRNumber, truncate(pr.Title, 40), pr.Author, pr.Platform, pr.State))
+		sb.WriteString(fmt.Sprintf("%s <b>#%d</b> %s — by %s (%s/%s)\n",
+			statusEmoji, pr.PRNumber, html.EscapeString(truncate(pr.Title, 40)), html.EscapeString(pr.Author), pr.Platform, pr.State))
 	}
 
-	return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeHTML})
 }
 
 // handleShowPR handles /pr command.
@@ -234,7 +239,7 @@ func (b *TelegramBot) handleShowPR(c telebot.Context) error {
 
 	args := strings.Fields(c.Text())
 	if len(args) < 3 {
-		return c.Send("Usage: `/pr <repo_group> <pr_number>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+		return c.Send("Usage: /pr repo_group pr_number")
 	}
 
 	repoGroup := args[1]
@@ -256,12 +261,12 @@ func (b *TelegramBot) handleShowPR(c telebot.Context) error {
 	})
 
 	if found == nil {
-		return c.Send(fmt.Sprintf("PR #%d not found in repo group *%s*.", prNumber, repoGroup),
-			&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+		return c.Send(fmt.Sprintf("PR #%d not found in repo group <b>%s</b>.", prNumber, html.EscapeString(repoGroup)),
+			&telebot.SendOptions{ParseMode: telebot.ModeHTML})
 	}
 
 	msg := fmt.Sprintf(
-		"*PR #%d* — %s\n\n"+
+		"<b>PR #%d</b> — %s\n\n"+
 			"  Author: %s\n"+
 			"  State: %s\n"+
 			"  Platform: %s\n"+
@@ -269,9 +274,9 @@ func (b *TelegramBot) handleShowPR(c telebot.Context) error {
 			"  Labels: %s\n"+
 			"  Spam: %v\n"+
 			"  Created: %s\n",
-		found.PRNumber, found.Title,
-		found.Author, found.State, found.Platform,
-		found.RepoGroup, strings.Join(found.Labels, ", "),
+		found.PRNumber, html.EscapeString(found.Title),
+		html.EscapeString(found.Author), found.State, found.Platform,
+		found.RepoGroup, html.EscapeString(strings.Join(found.Labels, ", ")),
 		found.SpamFlag,
 		found.CreatedAt.Format(time.RFC3339),
 	)
@@ -285,7 +290,7 @@ func (b *TelegramBot) handleShowPR(c telebot.Context) error {
 	selector.Inline(selector.Row(btnApprove, btnClose), selector.Row(btnSpam, btnReopen))
 
 	return c.Send(msg, &telebot.SendOptions{
-		ParseMode:   telebot.ModeMarkdown,
+		ParseMode:   telebot.ModeHTML,
 		ReplyMarkup: selector,
 	})
 }
@@ -298,7 +303,7 @@ func (b *TelegramBot) handleApprovePR(c telebot.Context) error {
 
 	args := strings.Fields(c.Text())
 	if len(args) < 3 {
-		return c.Send("Usage: `/approve <repo_group> <pr_id>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+		return c.Send("Usage: /approve repo_group pr_id")
 	}
 
 	repoGroup := args[1]
@@ -341,7 +346,7 @@ func (b *TelegramBot) handleClosePR(c telebot.Context) error {
 
 	args := strings.Fields(c.Text())
 	if len(args) < 3 {
-		return c.Send("Usage: `/close <repo_group> <pr_id>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+		return c.Send("Usage: /close repo_group pr_id")
 	}
 
 	repoGroup := args[1]
@@ -380,7 +385,7 @@ func (b *TelegramBot) handleReopenPR(c telebot.Context) error {
 
 	args := strings.Fields(c.Text())
 	if len(args) < 3 {
-		return c.Send("Usage: `/reopen <repo_group> <pr_id>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+		return c.Send("Usage: /reopen repo_group pr_id")
 	}
 
 	repoGroup := args[1]
@@ -410,11 +415,11 @@ func (b *TelegramBot) handleReopenPR(c telebot.Context) error {
 
 	// If this was a spam recovery, clear spam flag
 	if pr.SpamFlag {
-pr.State = "open"
-        pr.SpamFlag = false
-        pr.UpdatedAt = time.Now()
-        data, _ := json.Marshal(pr)
-        db.PutPRWithIndex(fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data, pr.ID, pr.RepoGroup, pr.PRNumber)
+		pr.State = "open"
+		pr.SpamFlag = false
+		pr.UpdatedAt = time.Now()
+		data, _ := json.Marshal(pr)
+		db.PutPRWithIndex(fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data, pr.ID, pr.RepoGroup, pr.PRNumber)
 	}
 
 	return c.Send(fmt.Sprintf("PR #%d reopened.", pr.PRNumber))
@@ -428,7 +433,7 @@ func (b *TelegramBot) handleMarkSpam(c telebot.Context) error {
 
 	args := strings.Fields(c.Text())
 	if len(args) < 3 {
-		return c.Send("Usage: `/spam <repo_group> <pr_id>`", &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+		return c.Send("Usage: /spam repo_group pr_id")
 	}
 
 	repoGroup := args[1]
@@ -444,12 +449,12 @@ func (b *TelegramBot) handleMarkSpam(c telebot.Context) error {
 	pr.State = "spam"
 	pr.UpdatedAt = time.Now()
 
-key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
-    data, _ := json.Marshal(pr)
-    db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	data, _ := json.Marshal(pr)
+	db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
 
-    // Close the PR on the platform
-    group := config.GetRepoGroupByName(b.cfg, repoGroup)
+	// Close the PR on the platform
+	group := config.GetRepoGroupByName(b.cfg, repoGroup)
 	if group != nil {
 		client := b.getClientForPlatform(pr.Platform)
 		if client != nil {
@@ -499,12 +504,12 @@ func (b *TelegramBot) handleShowQueue(c telebot.Context) error {
 	})
 
 	if len(items) == 0 {
-		return c.Send(fmt.Sprintf("Queue empty for *%s*.", repoGroup),
-			&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+		return c.Send(fmt.Sprintf("Queue empty for <b>%s</b>.", html.EscapeString(repoGroup)),
+			&telebot.SendOptions{ParseMode: telebot.ModeHTML})
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("*Merge Queue — %s*\n\n", repoGroup))
+	sb.WriteString(fmt.Sprintf("<b>Merge Queue — %s</b>\n\n", html.EscapeString(repoGroup)))
 	for _, item := range items {
 		statusEmoji := "⏳"
 		switch item.Status {
@@ -518,7 +523,7 @@ func (b *TelegramBot) handleShowQueue(c telebot.Context) error {
 		sb.WriteString(fmt.Sprintf("%s %s (%s) — %s\n", statusEmoji, item.PRID, item.Status, item.AddedAt.Format(time.RFC3339)))
 	}
 
-	return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeHTML})
 }
 
 // handleRecheckQueue handles /recheck command.
@@ -548,7 +553,7 @@ func (b *TelegramBot) handleShowConfig(c telebot.Context) error {
 
 	groups := config.GetRepoGroups(cfg)
 	var sb strings.Builder
-	sb.WriteString("*Current Config*\n\n")
+	sb.WriteString("<b>Current Config</b>\n\n")
 	sb.WriteString(fmt.Sprintf("  Server: %s (%s)\n", cfg.Server.Listen, cfg.Server.Mode))
 	sb.WriteString(fmt.Sprintf("  DB: %s\n", cfg.Database.Path))
 	sb.WriteString(fmt.Sprintf("  Events: %s\n", cfg.Events.Mode))
@@ -560,7 +565,7 @@ func (b *TelegramBot) handleShowConfig(c telebot.Context) error {
 		sb.WriteString(fmt.Sprintf("    - %s (%s)\n", g.Name, g.Mode))
 	}
 
-	return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeHTML})
 }
 
 // handleCallback handles inline button callbacks.
@@ -610,8 +615,8 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Failed: %v", err)})
 		}
 		c.Respond(&telebot.CallbackResponse{Text: "Approved ✅"})
-		c.Edit(fmt.Sprintf("%s\n\n_%s_", c.Message().Text, "✅ Approved via Telegram"),
-			&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+		c.Edit(fmt.Sprintf("%s\n\n<i>✅ Approved via Telegram</i>", html.EscapeString(c.Message().Text)),
+			&telebot.SendOptions{ParseMode: telebot.ModeHTML})
 
 	case "close":
 		if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
@@ -623,23 +628,23 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 		if err := client.ReopenPR(ctx, owner, repo, pr.PRNumber); err != nil {
 			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("Failed: %v", err)})
 		}
-if pr.SpamFlag {
-            pr.State = "open"
-            pr.SpamFlag = false
-            pr.UpdatedAt = time.Now()
-            data, _ := json.Marshal(pr)
-            key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
-            db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
-        }
-        c.Respond(&telebot.CallbackResponse{Text: "Reopened 🔄"})
+		if pr.SpamFlag {
+			pr.State = "open"
+			pr.SpamFlag = false
+			pr.UpdatedAt = time.Now()
+			data, _ := json.Marshal(pr)
+			key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+			db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
+		}
+		c.Respond(&telebot.CallbackResponse{Text: "Reopened 🔄"})
 
-    case "spam":
-        pr.SpamFlag = true
-        pr.State = "spam"
-        pr.UpdatedAt = time.Now()
-        data, _ := json.Marshal(pr)
-        key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
-        db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
+	case "spam":
+		pr.SpamFlag = true
+		pr.State = "spam"
+		pr.UpdatedAt = time.Now()
+		data, _ := json.Marshal(pr)
+		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+		db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
 		client.ClosePR(ctx, owner, repo, pr.PRNumber)
 		c.Respond(&telebot.CallbackResponse{Text: "Marked as spam 🚫"})
 	}
@@ -663,8 +668,7 @@ func (b *TelegramBot) handleText(c telebot.Context) error {
 		return b.handleShowConfig(c)
 	}
 
-	c.Send("Unknown command. Try /help for available commands.",
-		&telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	c.Send("Unknown command. Try /help for available commands.")
 	return nil
 }
 
@@ -742,9 +746,9 @@ func (b *TelegramBot) handleStaleCheck(c telebot.Context) error {
 
 	var lines []string
 	if dryRun {
-		lines = append(lines, "*Stale PR Dry Run:*")
+		lines = append(lines, "<b>Stale PR Dry Run:</b>")
 	} else {
-		lines = append(lines, "*Stale PR Check Results:*")
+		lines = append(lines, "<b>Stale PR Check Results:</b>")
 	}
 
 	for _, group := range groups {
@@ -771,10 +775,10 @@ func (b *TelegramBot) handleStaleCheck(c telebot.Context) error {
 			}
 			if hasStale && cfg.Stale.DaysUntilClose > 0 && days >= cfg.Stale.DaysUntilStale+cfg.Stale.DaysUntilClose {
 				lines = append(lines, fmt.Sprintf("- [CLOSE] #%d %s (%s, %dd stale)",
-					pr.PRNumber, truncate(pr.Title, 40), group.Name, days))
+					pr.PRNumber, html.EscapeString(truncate(pr.Title, 40)), group.Name, days))
 			} else if !hasStale && days >= cfg.Stale.DaysUntilStale {
 				lines = append(lines, fmt.Sprintf("- [MARK] #%d %s (%s, %dd inactive)",
-					pr.PRNumber, truncate(pr.Title, 40), group.Name, days))
+					pr.PRNumber, html.EscapeString(truncate(pr.Title, 40)), group.Name, days))
 			}
 		}
 	}
@@ -782,7 +786,7 @@ func (b *TelegramBot) handleStaleCheck(c telebot.Context) error {
 	if len(lines) == 1 {
 		return c.Send("No stale PRs found.")
 	}
-	return c.Send(strings.Join(lines, "\n"), &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+	return c.Send(strings.Join(lines, "\n"), &telebot.SendOptions{ParseMode: telebot.ModeHTML})
 }
 
 func (b *TelegramBot) handleUnstale(c telebot.Context) error {
@@ -792,7 +796,7 @@ func (b *TelegramBot) handleUnstale(c telebot.Context) error {
 
 	args := strings.Fields(c.Text())
 	if len(args) < 3 {
-		return c.Send("Usage: /unstale <repo_group> <pr_number>")
+		return c.Send("Usage: /unstale repo_group pr_number")
 	}
 
 	repoGroup := args[1]

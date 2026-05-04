@@ -102,7 +102,7 @@ func (n *TelegramNotifier) Send(ctx context.Context, title, body string) error {
 		return fmt.Errorf("telegram: bot not initialized")
 	}
 
-	message := fmt.Sprintf("*%s*\n\n%s", title, body)
+	message := fmt.Sprintf("*%s*\n\n%s", mdEscape(title), mdEscape(body))
 
 	var lastErr error
 	for _, chatID := range n.chatIDs {
@@ -131,7 +131,7 @@ func (n *TelegramNotifier) Send(ctx context.Context, title, body string) error {
 
 // sendViaHTTP sends notification via Telegram HTTP API (no SDK needed)
 func (n *TelegramNotifier) sendViaHTTP(ctx context.Context, title, body string) error {
-	message := fmt.Sprintf("*%s*\n\n%s", title, body)
+	message := fmt.Sprintf("*%s*\n\n%s", mdEscape(title), mdEscape(body))
 
 	var lastErr error
 	for _, chatID := range n.chatIDs {
@@ -198,4 +198,13 @@ func resolveRecipient(chatID string) telebot.Recipient {
 	}
 
 	return nil
+}
+
+// mdEscape escapes special characters for Telegram Markdown mode
+func mdEscape(s string) string {
+	escapeChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
+	for _, ch := range escapeChars {
+		s = strings.ReplaceAll(s, ch, "\\"+ch)
+	}
+	return s
 }
