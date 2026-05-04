@@ -105,6 +105,9 @@ func Bootstrap(cfg *models.Config) (*Server, error) {
 	go eventConsumer.Start()
 	slog.Info("event consumer started")
 
+	// 10. Start webhook retry worker
+	handlers.StartWebhookRetryWorker()
+
 	// 10. Start Telegram bot
 	startTelegram(cfg, clients, queueMgr, syncr, spamDetector)
 

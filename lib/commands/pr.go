@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -120,6 +121,45 @@ var prSpamCmd = &cobra.Command{
 	},
 }
 
+var prCommentCmd = &cobra.Command{
+	Use:   "comment [repo_group] [pr_id] [body]",
+	Short: "Comment on a pull request",
+	Args:  cobra.MinimumNArgs(3),
+	Run: func(cmd *cobra.Command, args []string) {
+		body := ""
+		for i := 2; i < len(args); i++ {
+			if i > 2 {
+				body += " "
+			}
+			body += args[i]
+		}
+
+		url := fmt.Sprintf("%s/api/v1/repos/%s/prs/%s/comment",
+			GetServer(cmd), args[0], args[1],
+		)
+
+		// Create a request with JSON body
+		reqBody := fmt.Sprintf(`{"body": "%s"}`, body)
+		req, err := http.NewRequest("POST", url, strings.NewReader(reqBody))
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		token := GetToken(cmd)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
+		defer resp.Body.Close()
+		handleWriteResponse(resp, "Comment added successfully")
+	},
+}
+
 func doRequest(method, url string, cmd *cobra.Command) *http.Response {
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
@@ -145,10 +185,91 @@ func init() {
 	prCmd.AddCommand(prCloseCmd)
 	prCmd.AddCommand(prReopenCmd)
 	prCmd.AddCommand(prSpamCmd)
+	prCmd.AddCommand(prCommentCmd)
+	prCmd.AddCommand(prBatchApproveCmd)
+	prCmd.AddCommand(prBatchCloseCmd)
+	prCmd.AddCommand(prBatchLabelCmd)
 
 	prListCmd.Flags().String("state", "open", "Filter by state")
 	prListCmd.Flags().String("platform", "", "Filter by platform")
 	prSpamCmd.Flags().Bool("undo", false, "Remove spam mark")
+	prBatchLabelCmd.Flags().String("label", "", "Label to add (required)")
+	prBatchLabelCmd.Flags().String("color", "", "Label color (optional)")
 
 	RootCmd.AddCommand(prCmd)
+}
+
+var prBatchApproveCmd = &cobra.Command{
+	Use:   "batch-approve [repo_group] [pr_ids]",
+	Short: "Approve multiple pull requests",
+	Args:  cobra.MinimumNArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		prIDs := strings.Split(args[1], ",")
+		url := fmt.Sprintf("%s/api/v1/repos/%s/prs/batch/approve", GetServer(cmd), args[0])
+		body := fmt.Sprintf(`{"pr_ids": ["%s"]`, strings.Join(prIDs, `","`))
+		body += "}"
+		resp := doBatchRequest(cmd, url, body)
+		if resp == nil {
+			return
+		}
+		handleWriteResponse(resp, "Batch approve completed")
+	},
+}
+
+var prBatchCloseCmd = &cobra.Command{
+	Use:   "batch-close [repo_group] [pr_ids]",
+	Short: "Close multiple pull requests",
+	Args:  cobra.MinimumNArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		prIDs := strings.Split(args[1], ",")
+		url := fmt.Sprintf("%s/api/v1/repos/%s/prs/batch/close", GetServer(cmd), args[0])
+		body := fmt.Sprintf(`{"pr_ids": ["%s"]`, strings.Join(prIDs, `","`))
+		body += "}"
+		resp := doBatchRequest(cmd, url, body)
+		if resp == nil {
+			return
+		}
+		handleWriteResponse(resp, "Batch close completed")
+	},
+}
+
+var prBatchLabelCmd = &cobra.Command{
+	Use:   "batch-label [repo_group] [pr_ids]",
+	Short: "Add label to multiple pull requests",
+	Args:  cobra.MinimumNArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		prIDs := strings.Split(args[1], ",")
+		label, _ := cmd.Flags().GetString("label")
+		if label == "" {
+			fmt.Println("Error: --label flag is required")
+			return
+		}
+		color, _ := cmd.Flags().GetString("color")
+		url := fmt.Sprintf("%s/api/v1/repos/%s/prs/batch/label", GetServer(cmd), args[0])
+		body := fmt.Sprintf(`{"pr_ids": ["%s"], "label": "%s", "color": "%s"}`, strings.Join(prIDs, `","`), label, color)
+		resp := doBatchRequest(cmd, url, body)
+		if resp == nil {
+			return
+		}
+		handleWriteResponse(resp, "Batch label completed")
+	},
+}
+
+func doBatchRequest(cmd *cobra.Command, url, body string) *http.Response {
+	req, err := http.NewRequest("POST", url, strings.NewReader(body))
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	token := GetToken(cmd)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return nil
+	}
+	return resp
 }

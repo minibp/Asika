@@ -41,6 +41,12 @@ func (m *Manager) AddToQueue(pr *models.PRRecord) error {
 		return nil
 	}
 
+	// Skip draft PRs
+	if pr.IsDraft {
+		slog.Info("skipping draft PR", "pr_id", pr.ID, "title", pr.Title)
+		return nil
+	}
+
 	// Get merge criteria from repo group config
 	group := config.GetRepoGroupByName(m.cfg, pr.RepoGroup)
 	criteria := models.MergeCriteria{

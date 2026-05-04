@@ -41,6 +41,7 @@ type PRRecord struct {
 	DiffFiles      []string  `json:"diff_files"` // changed file list for label rules
 	Events         []PREvent `json:"events"`
 	IsDraft        bool      `json:"is_draft"` // true if PR is a draft (GitHub) or WIP (GitLab)
+	HasConflict    bool      `json:"has_conflict"` // true if PR has merge conflicts
 }
 
 // PREvent represents a pull request event
@@ -245,6 +246,18 @@ type FeishuConfig struct {
 	VerificationToken string `toml:"verification_token" json:"verification_token"`
 	EncryptKey   string `toml:"encrypt_key" json:"encrypt_key"`
 	AdminIDs     []string `toml:"admin_ids" json:"admin_ids"`
+}
+
+// WebhookRetry represents a failed webhook that needs retry
+type WebhookRetry struct {
+    ID         string    `json:"id"`
+    RepoGroup  string    `json:"repo_group"`
+    Platform   string    `json:"platform"`
+    Body       []byte    `json:"body"`
+    FailCount  int       `json:"fail_count"`
+    LastError  string    `json:"last_error"`
+    LastFailed time.Time `json:"last_failed"`
+    NextRetry  time.Time `json:"next_retry"`
 }
 
 // DiscordConfig represents Discord bot configuration

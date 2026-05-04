@@ -105,6 +105,7 @@ func giteaPRToRecord(pr *gitea.PullRequest) *models.PRRecord {
 		CreatedAt:      *pr.Created,
 		UpdatedAt:      *pr.Updated,
 		Events:         []models.PREvent{},
+		HasConflict:    !pr.Mergeable,
 	}
 }
 

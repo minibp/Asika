@@ -1,10 +1,12 @@
 package db
 
 import (
+    "encoding/json"
     "fmt"
     "log/slog"
     "time"
 
+    "asika/common/models"
     "go.etcd.io/bbolt"
 )
 
@@ -32,6 +34,7 @@ func Init(dbPath string) error {
             BucketSyncHistory,
             BucketPRIndexByID,
             BucketPRIndexByRG,
+            BucketWebhookRetries,
         }
         for _, bucket := range buckets {
             if _, err := tx.CreateBucketIfNotExists([]byte(bucket)); err != nil {
@@ -191,6 +194,74 @@ func GetPRByIndex(prID, repoGroup string, prNumber int) ([]byte, error) {
 
         return nil
     })
-
+    
     return result, err
+}
+
+// PutWebhookRetry stores a webhook retry entry
+func PutWebhookRetry(retry *models.WebhookRetry) error {
+    data, err := json.Marshal(retry)
+    if err != nil {
+        return err
+    }
+    return Put(BucketWebhookRetries, retry.ID, data)
+}
+
+// GetWebhookRetry retrieves a webhook retry by ID
+func GetWebhookRetry(id string) (*models.WebhookRetry, error) {
+    data, err := Get(BucketWebhookRetries, id)
+    if err != nil || data == nil {
+        return nil, err
+    }
+    var retry models.WebhookRetry
+    if err := json.Unmarshal(data, &retry); err != nil {
+        return nil, err
+    }
+    return &retry, nil
+}
+
+// DeleteWebhookRetry removes a webhook retry entry
+func DeleteWebhookRetry(id string) error {
+    return Delete(BucketWebhookRetries, id)
+}
+
+// ForEachWebhookRetry iterates over all webhook retry entries
+func ForEachWebhookRetry(fn func(retry *models.WebhookRetry) error) error {
+    return ForEach(BucketWebhookRetries, func(key, value []byte) error {
+        var retry models.WebhookRetry
+        if err := json.Unmarshal(value, &retry); err != nil {
+            return nil // skip invalid entries
+        }
+        return fn(&retry)
+    })
+}
+
+// GetDueWebhookRetries returns retries that are due for retry (NextRetry <= now)
+func GetDueWebhookRetries(now time.Time) ([]*models.WebhookRetry, error) {
+    var due []*models.WebhookRetry
+    err := ForEachWebhookRetry(func(retry *models.WebhookRetry) error {
+        if retry.NextRetry.IsZero() || retry.NextRetry.After(now) {
+            return nil
+        }
+        due = append(due, retry)
+        return nil
+    })
+    return due, err
+}
+
+// AppendAuditLog adds an audit log entry to the database
+func AppendAuditLog(level, message string, ctx map[string]interface{}) error {
+    log := models.AuditLog{
+        Timestamp: time.Now(),
+        Level:     level,
+        Message:   message,
+        Context:   ctx,
+    }
+    data, err := json.Marshal(log)
+    if err != nil {
+        return err
+    }
+    // Use timestamp + random as key to allow multiple entries with same timestamp
+    key := fmt.Sprintf("%d_%s", log.Timestamp.UnixNano(), message[:min(len(message), 8)])
+    return Put(BucketLogs, key, data)
 }

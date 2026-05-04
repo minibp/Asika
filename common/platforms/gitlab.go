@@ -124,6 +124,7 @@ func gitLabMRToRecord(mr *gitlab.MergeRequest) *models.PRRecord {
 		UpdatedAt:      updatedAt,
 		Events:         []models.PREvent{},
 		IsDraft:        mr.WorkInProgress,
+		HasConflict:    false, // TODO: implement merge status check for GitLab
 	}
 }
 

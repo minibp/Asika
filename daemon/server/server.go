@@ -150,8 +150,12 @@ func (s *Server) setupRoutes() {
 			prs.POST("/:pr_id/approve", handlers.ApprovePR)
 			prs.POST("/:pr_id/close", handlers.ClosePR)
 			prs.POST("/:pr_id/reopen", handlers.ReopenPR)
-			prs.POST("/:pr_id/spam", handlers.MarkSpam)
-		}
+		prs.POST("/:pr_id/spam", handlers.MarkSpam)
+		prs.POST("/:pr_id/comment", handlers.CommentPR)
+		prs.POST("/batch/approve", handlers.BatchApprovePR)
+		prs.POST("/batch/close", handlers.BatchClosePR)
+		prs.POST("/batch/label", handlers.BatchLabelPR)
+	}
 
 		// Queue management (8.3)
 		queue := protected.Group("/queue/:repo_group")

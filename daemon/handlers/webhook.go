@@ -5,10 +5,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"asika/common/config"
+	"asika/common/db"
 	"asika/common/events"
 	"asika/common/models"
 	"asika/common/platforms"
@@ -49,19 +52,52 @@ func WebhookHandler(c *gin.Context) {
 		return
 	}
 
-	eventType, pr, err := parseWebhookEvent(platform, body, repoGroup)
+	// Generate webhook ID and store in retry queue before processing
+	webhookID := uuid.New().String()
+	retry := &models.WebhookRetry{
+		ID:         webhookID,
+		RepoGroup:  repoGroup,
+		Platform:   platform,
+		Body:       body,
+		FailCount:  0,
+		LastFailed: time.Time{},
+		NextRetry:  time.Time{},
+	}
+	if err := db.PutWebhookRetry(retry); err != nil {
+		slog.Warn("failed to store webhook for retry", "error", err)
+	}
+
+	eventType, _, err := processWebhook(platform, repoGroup, body)
 	if err != nil {
-		slog.Error("failed to parse webhook", "error", err, "platform", platform)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse webhook: " + err.Error()})
+		slog.Error("failed to process webhook", "error", err, "platform", platform)
+		// Update retry entry with failure
+		retry.FailCount++
+		retry.LastError = err.Error()
+		retry.LastFailed = time.Now()
+		retry.NextRetry = time.Now().Add(time.Duration(1<<uint(retry.FailCount)) * time.Second)
+		db.PutWebhookRetry(retry)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to process webhook: " + err.Error()})
 		return
 	}
 
-	if eventType != "" && pr != nil {
-		events.PublishPR(events.EventType(eventType), repoGroup, platform, pr, nil)
-		slog.Info("webhook event published", "type", eventType, "repo_group", repoGroup, "platform", platform, "pr", pr.PRNumber)
-	}
+	// Success - remove from retry queue
+	db.DeleteWebhookRetry(webhookID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "webhook received", "event": eventType})
+}
+
+// processWebhook processes a webhook and returns eventType, PR record, and error.
+// This is used by both the webhook handler and the retry worker.
+func processWebhook(platform, repoGroup string, body []byte) (eventType string, pr *models.PRRecord, err error) {
+    eventType, pr, err = parseWebhookEvent(platform, body, repoGroup)
+    if err != nil {
+        return
+    }
+    if eventType != "" && pr != nil {
+        events.PublishPR(events.EventType(eventType), repoGroup, platform, pr, nil)
+        slog.Info("webhook event published", "type", eventType, "repo_group", repoGroup, "platform", platform, "pr", pr.PRNumber)
+    }
+    return
 }
 
 // verifyWebhookSignature verifies the webhook signature based on platform
@@ -105,6 +141,7 @@ func parseGitHubWebhook(body []byte, repoGroup string) (string, *models.PRRecord
 			Title   string `json:"title"`
 			State   string `json:"state"`
 			Merged  bool   `json:"merged"`
+			Draft   bool   `json:"draft"`
 			HTMLURL string `json:"html_url"`
 			User    struct {
 				Login string `json:"login"`
@@ -135,6 +172,7 @@ func parseGitHubWebhook(body []byte, repoGroup string) (string, *models.PRRecord
 		Author:    payload.PullRequest.User.Login,
 		State:     payload.PullRequest.State,
 		RepoGroup: repoGroup,
+		IsDraft:   payload.PullRequest.Draft,
 	}
 
 	if payload.PullRequest.Merged {
@@ -190,13 +228,24 @@ func parseGitLabWebhook(body []byte, repoGroup string) (string, *models.PRRecord
 		return "", nil, err
 	}
 
+	// Detect WIP/Draft PRs by title prefix
+	isDraft := false
+	title := payload.ObjectAttributes.Title
+	if len(title) >= 4 && (title[:4] == "WIP:" || title[:4] == "wip:") {
+		isDraft = true
+	}
+	if len(title) >= 7 && (title[:7] == "Draft:" || title[:7] == "draft:") {
+		isDraft = true
+	}
+
 	pr := &models.PRRecord{
 		Platform:  "gitlab",
 		PRNumber:  payload.ObjectAttributes.IID,
-		Title:     payload.ObjectAttributes.Title,
+		Title:     title,
 		Author:    payload.User.Username,
 		State:     payload.ObjectAttributes.State,
 		RepoGroup: repoGroup,
+		IsDraft:   isDraft,
 	}
 
 	if payload.ObjectAttributes.Merged {
@@ -233,6 +282,7 @@ func parseGiteaWebhook(body []byte, repoGroup string) (string, *models.PRRecord,
 			Title  string `json:"title"`
 			State  string `json:"state"`
 			Merged bool   `json:"merged"`
+			Draft  bool   `json:"draft"`
 			Poster struct {
 				Login string `json:"login"`
 			} `json:"poster"`
@@ -261,6 +311,7 @@ func parseGiteaWebhook(body []byte, repoGroup string) (string, *models.PRRecord,
 		Author:    author,
 		State:     payload.PullRequest.State,
 		RepoGroup: repoGroup,
+		IsDraft:   payload.PullRequest.Draft,
 	}
 
 	if payload.PullRequest.Merged {
@@ -307,4 +358,54 @@ func GetOwnerRepoFromGroup(group *models.RepoGroup, platform string) (owner, rep
 		return "", repoPath
 	}
 	return repoPath[:idx], repoPath[idx+1:]
+}
+
+// StartWebhookRetryWorker starts a background worker that retries failed webhooks.
+// It runs every minute and processes webhooks that are due for retry.
+func StartWebhookRetryWorker() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			retries, err := db.GetDueWebhookRetries(time.Now())
+			if err != nil {
+				slog.Error("failed to get due webhook retries", "error", err)
+				continue
+			}
+
+			for _, retry := range retries {
+				slog.Info("retrying webhook", "id", retry.ID, "repo_group", retry.RepoGroup, "platform", retry.Platform, "fail_count", retry.FailCount)
+
+				_, _, err := processWebhook(retry.Platform, retry.RepoGroup, retry.Body)
+				if err != nil {
+					slog.Warn("webhook retry failed", "id", retry.ID, "error", err, "fail_count", retry.FailCount)
+
+					retry.FailCount++
+					retry.LastError = err.Error()
+					retry.LastFailed = time.Now()
+					// Exponential backoff: 2^fail_count seconds, max 1 hour
+					backoff := time.Duration(1<<uint(min(retry.FailCount, 10))) * time.Second
+					if backoff > time.Hour {
+						backoff = time.Hour
+					}
+					retry.NextRetry = time.Now().Add(backoff)
+
+					// Max retries reached (e.g., 10), delete the entry
+					if retry.FailCount >= 10 {
+						slog.Error("webhook retry max attempts reached, giving up", "id", retry.ID)
+						db.DeleteWebhookRetry(retry.ID)
+						// TODO: notify admins of permanent failure
+						continue
+					}
+
+					db.PutWebhookRetry(retry)
+					continue
+				}
+
+				// Success - remove from retry queue
+				slog.Info("webhook retry succeeded", "id", retry.ID)
+				db.DeleteWebhookRetry(retry.ID)
+			}
+		}
+	}()
+	slog.Info("webhook retry worker started")
 }

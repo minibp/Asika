@@ -49,6 +49,7 @@ func (c *GitHubClient) GetPR(ctx context.Context, owner, repo string, number int
 		CreatedAt:      pr.GetCreatedAt().Time,
 		UpdatedAt:      pr.GetUpdatedAt().Time,
 		Events:         []models.PREvent{},
+		HasConflict:    !pr.GetMergeable(),
 	}
 	return record, nil
 }

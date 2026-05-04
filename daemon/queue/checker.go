@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"asika/common/config"
 	"asika/common/db"
@@ -38,6 +39,12 @@ func (c *Checker) ShouldMerge(item *models.QueueItem) (bool, error) {
 	group := config.GetRepoGroupByName(c.cfg, pr.RepoGroup)
 	if group == nil {
 		return false, fmt.Errorf("repo group not found: %s", pr.RepoGroup)
+	}
+
+	// Check for merge conflicts
+	if pr.HasConflict {
+		slog.Info("PR has merge conflicts, skipping", "pr_id", pr.ID, "title", pr.Title)
+		return false, nil
 	}
 
 	// Check approvals

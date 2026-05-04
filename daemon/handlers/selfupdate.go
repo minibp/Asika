@@ -16,6 +16,7 @@ import (
 
     "github.com/gin-gonic/gin"
     "github.com/google/go-github/v69/github"
+    "golang.org/x/oauth2"
 
     "asika/common/config"
     "asika/common/version"
@@ -37,7 +38,16 @@ type UpdateProgress struct {
 
 // CheckForUpdate checks GitHub for a newer version.
 func CheckForUpdate(c *gin.Context) {
-	client := github.NewClient(nil)
+	cfg := config.Current()
+	var httpClient *http.Client
+	if cfg != nil && cfg.Tokens.GitHub != "" {
+		// Use authenticated client for higher rate limit
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: cfg.Tokens.GitHub})
+		httpClient = oauth2.NewClient(context.Background(), ts)
+	} else {
+		httpClient = &http.Client{Timeout: 60 * time.Second}
+	}
+	client := github.NewClient(httpClient)
 
 	release, _, err := client.Repositories.GetLatestRelease(context.Background(), githubOwner, githubRepo)
 	if err != nil {
@@ -79,8 +89,17 @@ func PerformWebUpdate(c *gin.Context) {
 		flusher.Flush()
 	}
 
-	client := github.NewClient(nil)
+	// Create GitHub client with optional authentication
+	var httpClient *http.Client
+	if cfg.Tokens.GitHub != "" {
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: cfg.Tokens.GitHub})
+		httpClient = oauth2.NewClient(context.Background(), ts)
+	} else {
+		httpClient = &http.Client{Timeout: 60 * time.Second}
+	}
+	client := github.NewClient(httpClient)
 
+	// Get latest release
 	release, _, err := client.Repositories.GetLatestRelease(context.Background(), githubOwner, githubRepo)
 	if err != nil {
 		sendEvent("error", fmt.Sprintf(`{"error":"failed to fetch release: %s"}`, err.Error()))
