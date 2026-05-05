@@ -2,6 +2,7 @@
 
 ## Unreleased
 - Add Telegram bot command menu (setMyCommands) for quick command access in UI
+- Add short commit hash to version string (e.g. 20260505DEV-3e06b0f), fallback to "dev" when no hash available
 
 ## v20260505DEV
 - Fix ForEachPrefix using index key instead of value to fetch from target bucket (caused ListPRs returning empty)

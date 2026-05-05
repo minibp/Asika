@@ -15,13 +15,16 @@ SU() {
 	fi
 }
 
-# Generate version: YYYYMMDD[SUFFIX]
+# Generate version: YYYYMMDD[SUFFIX][-HASH]
 # Suffixes: HF (hotfix), CVE (security), DEV (beta), DEP (dependency update)
+# If not a release build, appends the short commit hash (or "dev" if unavailable).
 gen_version() {
 	local suffix="${1:-DEV}"
 	local date
 	date=$(date +%Y%m%d)
-	echo "${date}${suffix}"
+	local hash
+	hash=$(git rev-parse --short=7 HEAD 2>/dev/null || echo "dev")
+	echo "${date}${suffix}-${hash}"
 }
 
 # Build with strip (default)
