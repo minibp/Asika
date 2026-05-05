@@ -11,6 +11,8 @@ import (
 	"asika/common/version"
 )
 
+var updateHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 func startUpdateCheck(cfg *models.Config) {
 	if !cfg.Updates.Check {
 		return
@@ -31,7 +33,7 @@ func checkAndNotify(cfg *models.Config) {
 		TagName string `json:"tag_name"`
 	}
 
-	resp, err := http.Get("https://api.github.com/repos/AsikaProject/asika/releases/latest")
+	resp, err := updateHTTPClient.Get("https://api.github.com/repos/AsikaProject/asika/releases/latest")
 	if err != nil {
 		slog.Warn("update check failed", "error", err)
 		return

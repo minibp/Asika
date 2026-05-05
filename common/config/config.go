@@ -45,7 +45,7 @@ func Load(path string) (*models.Config, error) {
 		Server: models.ServerConfig{
 			Listen:                 ":8080",
 			Mode:                   "release",
-			CORSOrigins:            []string{"*"},
+			CORSOrigins:            []string{},
 			RateLimitEnabled:       true,
 			RateLimitRPS:           10,
 			RateLimitBurst:         20,

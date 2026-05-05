@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -57,7 +58,7 @@ func SubmitWizardStep(c *gin.Context) {
 		return
 	}
 
-	slog.Info("wizard step submitted", "step", step, "data", data)
+	slog.Info("wizard step submitted", "step", step)
 	c.JSON(http.StatusOK, gin.H{"message": "step saved", "step": step})
 }
 
@@ -87,6 +88,10 @@ func CompleteWizard(c *gin.Context) {
 	}
 	if cfg.Database.Path == "" {
 		cfg.Database.Path = "/var/lib/asika/asika.db"
+	}
+	if !filepath.IsAbs(cfg.Database.Path) || strings.Contains(cfg.Database.Path, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "database.path must be an absolute path without .. components"})
+		return
 	}
 	if cfg.Auth.JWTSecret == "" {
 		cfg.Auth.JWTSecret = config.GenerateUUID()

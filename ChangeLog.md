@@ -1,5 +1,25 @@
 # ChangeLog for Asika
 
+## v20260506DEV (2026-05-05)
+
+### Security Fixes
+- Critical: self-update now fails closed if checksums.txt cannot be downloaded (no silent skip)
+- High: wizard no longer logs sensitive data (tokens, passwords) in step submission
+- High: config hookpath validated — must be absolute path without .. components
+- High: CLI self-update validates download URL is from github.com or objects.githubusercontent.com
+- Medium: CSV export escapes message fields to prevent formula injection
+- Medium: CORS default changed from wildcard (\*) to empty (must be explicitly configured)
+- Medium: pprof debug endpoints now require JWT authentication
+- Medium: config file written with 0600 permissions (was 0644, world-readable)
+- Medium: webhook platform parameter validated against whitelist (github/gitlab/gitea)
+- Medium: JWT algorithm check uses strict HS256 comparison (instead of generic HMAC interface)
+- Medium: update checker and CLI self-update HTTP clients now have 30-60s timeouts
+- Medium: wizard database.path validated — must be absolute path without .. components
+- Medium: webhook error responses no longer reflect internal error messages to clients
+
+### Chores
+- Remove systemd sd_notify integration (service uses Type=simple, no notification needed)
+
 ## Unreleased
 - Fix GitLab HasConflict: use mr.HasConflicts field instead of hardcoded false
 - Fix webhook permanent failure: notify all configured channels when retries exhausted

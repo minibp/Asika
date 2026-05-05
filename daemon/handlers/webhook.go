@@ -23,6 +23,12 @@ func WebhookHandler(c *gin.Context) {
 	repoGroup := c.Param("repo_group")
 	platform := c.Param("platform")
 
+	validPlatforms := map[string]bool{"github": true, "gitlab": true, "gitea": true}
+	if !validPlatforms[platform] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported platform: " + platform})
+		return
+	}
+
 	cfg := config.Current()
 	if cfg == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config not loaded"})
@@ -77,7 +83,7 @@ func WebhookHandler(c *gin.Context) {
 		retry.LastFailed = time.Now()
 		retry.NextRetry = time.Now().Add(time.Duration(1<<uint(retry.FailCount)) * time.Second)
 		db.PutWebhookRetry(retry)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to process webhook: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to process webhook"})
 		return
 	}
 

@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/gin-gonic/gin"
@@ -95,6 +97,15 @@ func UpdateConfig(c *gin.Context) {
 		}
 	}
 	if hookpath, ok := patch["hookpath"]; ok {
+		hp, ok := hookpath.(string)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "hookpath must be a string"})
+			return
+		}
+		if !filepath.IsAbs(hp) || strings.Contains(hp, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "hookpath must be an absolute path without .. components"})
+			return
+		}
 		existing["hookpath"] = hookpath
 	}
 
@@ -105,7 +116,7 @@ func UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	if err := os.WriteFile(configPath, newData, 0644); err != nil {
+	if err := os.WriteFile(configPath, newData, 0600); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config"})
 		return
 	}

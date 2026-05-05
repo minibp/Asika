@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/google/go-github/v69/github"
 	"github.com/spf13/cobra"
@@ -221,11 +222,18 @@ func findAssets(release *github.RepositoryRelease, binaryName string) (binaryURL
 			checksumURL = asset.GetBrowserDownloadURL()
 		}
 	}
+	if binaryURL != "" {
+		if !strings.HasPrefix(binaryURL, "https://github.com/") && !strings.HasPrefix(binaryURL, "https://objects.githubusercontent.com/") {
+			binaryURL = ""
+		}
+	}
 	return
 }
 
+var downloadHTTPClient = &http.Client{Timeout: 60 * time.Second}
+
 func downloadFile(url, dest string) error {
-	resp, err := http.Get(url)
+	resp, err := downloadHTTPClient.Get(url)
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -940,7 +941,7 @@ func ExportLogs(c *gin.Context) {
 		c.Header("Content-Disposition", "attachment; filename=asika-audit-logs.csv")
 		c.String(http.StatusOK, "timestamp,level,message\n")
 		for _, l := range logs {
-			c.String(http.StatusOK, "%s,%s,%s\n", l.Timestamp.Format(time.RFC3339), l.Level, l.Message)
+			c.String(http.StatusOK, "%s,%s,\"%s\"\n", l.Timestamp.Format(time.RFC3339), l.Level, strings.ReplaceAll(l.Message, "\"", "\"\""))
 		}
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported format: " + format})

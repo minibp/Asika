@@ -53,9 +53,9 @@ func GenerateJWT(username, role string) (string, error) {
 // ValidateJWT validates a JWT token and returns the claims
 func ValidateJWT(tokenString string) (jwt.MapClaims, error) {
     token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-        if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-            return nil, jwt.ErrSignatureInvalid
-        }
+	if token.Method != jwt.SigningMethodHS256 {
+			return nil, jwt.ErrSignatureInvalid
+		}
         return jwtSecret, nil
     })
 

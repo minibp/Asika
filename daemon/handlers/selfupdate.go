@@ -123,6 +123,10 @@ func PerformWebUpdate(c *gin.Context) {
 		sendEvent("error", fmt.Sprintf(`{"error":"no asset found for %s"}`, assetName))
 		return
 	}
+	if !isValidGitHubDownloadURL(downloadURL) {
+		sendEvent("error", fmt.Sprintf(`{"error":"invalid download URL: %s"}`, downloadURL))
+		return
+	}
 
 	sendEvent("progress", `{"status":"downloading","progress":0,"message":"Starting download..."}`)
 
@@ -139,29 +143,32 @@ func PerformWebUpdate(c *gin.Context) {
 		return
 	}
 
-	if checksumURL != "" {
-		sendEvent("progress", `{"status":"verifying","progress":100,"message":"Verifying checksum..."}`)
+	if checksumURL == "" {
+		sendEvent("error", `{"error":"checksums.txt asset not found, cannot verify download integrity"}`)
+		return
+	}
 
-checksumPath := filepath.Join(tmpDir, "checksums.txt")
-        resp, err := httpUpdateClient.Get(checksumURL)
-		if err != nil {
-			sendEvent("error", fmt.Sprintf(`{"error":"failed to download checksums: %s"}`, err.Error()))
-			return
-		}
-		f, err := os.Create(checksumPath)
-		if err != nil {
-			sendEvent("error", fmt.Sprintf(`{"error":"%s"}`, err.Error()))
-			resp.Body.Close()
-			return
-		}
-		io.Copy(f, resp.Body)
-		f.Close()
+	sendEvent("progress", `{"status":"verifying","progress":100,"message":"Verifying checksum..."}`)
+
+	checksumPath := filepath.Join(tmpDir, "checksums.txt")
+	resp, err := httpUpdateClient.Get(checksumURL)
+	if err != nil {
+		sendEvent("error", fmt.Sprintf(`{"error":"failed to download checksums: %s"}`, err.Error()))
+		return
+	}
+	f, err := os.Create(checksumPath)
+	if err != nil {
+		sendEvent("error", fmt.Sprintf(`{"error":"%s"}`, err.Error()))
 		resp.Body.Close()
+		return
+	}
+	io.Copy(f, resp.Body)
+	f.Close()
+	resp.Body.Close()
 
-		if err := verifyWebChecksum(binaryPath, checksumPath, assetName); err != nil {
-			sendEvent("error", fmt.Sprintf(`{"error":"checksum verification failed: %s"}`, err.Error()))
-			return
-		}
+	if err := verifyWebChecksum(binaryPath, checksumPath, assetName); err != nil {
+		sendEvent("error", fmt.Sprintf(`{"error":"checksum verification failed: %s"}`, err.Error()))
+		return
 	}
 
 	sendEvent("progress", `{"status":"installing","progress":100,"message":"Installing update..."}`)
@@ -283,6 +290,10 @@ func verifyWebChecksum(binaryPath, checksumPath, assetName string) error {
 		return fmt.Errorf("checksum mismatch")
 	}
 	return nil
+}
+
+func isValidGitHubDownloadURL(url string) bool {
+	return strings.HasPrefix(url, "https://github.com/") || strings.HasPrefix(url, "https://objects.githubusercontent.com/")
 }
 
 func parseChecksumLine(line string) string {
