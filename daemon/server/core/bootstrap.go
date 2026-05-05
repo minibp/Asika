@@ -85,6 +85,10 @@ func Bootstrap(cfg *models.Config) (*InitConfig, error) {
 		Clients: clients,
 	}
 
+	MigrateRepoGroupNames(cfg)
+	MigratePRStates(cfg)
+	SyncPRStates(cfg, clients)
+
 	ic.QueueMgr, ic.SpamDetector, ic.Poller, ic.EventConsumer, _ = StartWorkers(cfg, clients)
 
 	SetupConfigReload()
