@@ -92,18 +92,19 @@ func StartWorkers(
 	return
 }
 
-func startStaleCheck(cfg *models.Config, mgr *stale.Manager) {
-	if !cfg.Stale.Enabled {
-		return
-	}
-
-	interval := parseDuration(cfg.Stale.CheckInterval, 6*time.Hour)
-	go func() {
-		go mgr.CheckAllGroups()
-		ticker := time.NewTicker(interval)
-		for range ticker.C {
-			mgr.CheckAllGroups()
+	func startStaleCheck(cfg *models.Config, mgr *stale.Manager) {
+		if !cfg.Stale.Enabled {
+			return
 		}
-	}()
-	slog.Info("stale checker started", "interval", interval)
-}
+
+		interval := parseDuration(cfg.Stale.CheckInterval, 6*time.Hour)
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			mgr.CheckAllGroups()
+			for range ticker.C {
+				mgr.CheckAllGroups()
+			}
+		}()
+		slog.Info("stale checker started", "interval", interval)
+	}

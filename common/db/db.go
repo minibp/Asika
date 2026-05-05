@@ -1,13 +1,15 @@
 package db
 
 import (
-    "encoding/json"
-    "fmt"
-    "log/slog"
-    "time"
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"time"
 
-    "asika/common/models"
-    "go.etcd.io/bbolt"
+	"asika/common/models"
+	"go.etcd.io/bbolt"
 )
 
 var (
@@ -105,15 +107,47 @@ func Delete(bucket, key string) error {
 
 // ForEach iterates over all key-value pairs in the specified bucket
 func ForEach(bucket string, fn func(key, value []byte) error) error {
-    return DB.View(func(tx *bbolt.Tx) error {
-        b := tx.Bucket([]byte(bucket))
-        if b == nil {
-            return bbolt.ErrBucketNotFound
-        }
-        return b.ForEach(func(k, v []byte) error {
-            return fn(k, v)
-        })
-    })
+	return DB.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return bbolt.ErrBucketNotFound
+		}
+		return b.ForEach(func(k, v []byte) error {
+			return fn(k, v)
+		})
+	})
+}
+
+// ForEachPrefix iterates over key-value pairs in the index bucket with the given prefix,
+// then fetches the actual value from the target bucket using the indexed key.
+func ForEachPrefix(indexBucket, targetBucket, prefix string, fn func(key, value []byte) error) error {
+	return DB.View(func(tx *bbolt.Tx) error {
+		idxB := tx.Bucket([]byte(indexBucket))
+		if idxB == nil {
+			return bbolt.ErrBucketNotFound
+		}
+		targetB := tx.Bucket([]byte(targetBucket))
+		if targetB == nil {
+			return bbolt.ErrBucketNotFound
+		}
+		c := idxB.Cursor()
+		for k, _ := c.Seek([]byte(prefix)); k != nil && string(k[:min(len(k), len(prefix))]) == prefix; k, _ = c.Next() {
+			val := targetB.Get(k)
+			if val != nil {
+				if err := fn(k, val); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // RunMigrations runs database migrations
@@ -261,7 +295,9 @@ func AppendAuditLog(level, message string, ctx map[string]interface{}) error {
     if err != nil {
         return err
     }
-    // Use timestamp + random as key to allow multiple entries with same timestamp
-    key := fmt.Sprintf("%d_%s", log.Timestamp.UnixNano(), message[:min(len(message), 8)])
-    return Put(BucketLogs, key, data)
+     // Use timestamp + random suffix to avoid key collisions
+     var randBytes [4]byte
+     rand.Read(randBytes[:])
+     key := fmt.Sprintf("%d_%08x", log.Timestamp.UnixNano(), binary.BigEndian.Uint32(randBytes[:]))
+     return Put(BucketLogs, key, data)
 }

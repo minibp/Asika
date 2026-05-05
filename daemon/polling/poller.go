@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.etcd.io/bbolt"
 
 	"asika/common/db"
 	"asika/common/events"
@@ -117,17 +118,21 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 		return 0, 1
 	}
 
-	// Compare with local DB and publish events
+	type prSync struct {
+		pr   *models.PRRecord
+		key  string
+		data []byte
+	}
+	var toWrite []prSync
+
 	for _, pr := range prs {
 		pr.RepoGroup = repoGroup
 		pr.Platform = platform
 
-		// GitHub API returns merged PRs as "closed"; detect via MergedAt
 		if pr.State == "closed" && !pr.MergedAt.IsZero() {
 			pr.State = "merged"
 		}
 
-		// Check if PR exists in DB
 		key := fmt.Sprintf("%s#%s#%d", repoGroup, platform, pr.PRNumber)
 		data, _ := db.Get(db.BucketPRs, key)
 
@@ -136,7 +141,6 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 			pr.UpdatedAt = time.Now()
 			events.PublishPR(events.EventPROpened, repoGroup, platform, pr, nil)
 		} else {
-			// Check if updated
 			var existing models.PRRecord
 			if err := json.Unmarshal(data, &existing); err == nil {
 				if existing.State != pr.State {
@@ -152,16 +156,40 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 			}
 		}
 
-		// Store/update in DB
 		if pr.ID == "" {
 			pr.ID = uuid.New().String()
 		}
 		prData, _ := json.Marshal(pr)
-		if err := db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber); err != nil {
-			slog.Error("failed to save PR", "pr", pr.PRNumber, "platform", platform, "error", err)
-			failed++
+		toWrite = append(toWrite, prSync{pr: pr, key: key, data: prData})
+	}
+
+	if len(toWrite) > 0 {
+		err := db.Update(func(tx *bbolt.Tx) error {
+			b := tx.Bucket([]byte(db.BucketPRs))
+			if b == nil {
+				return bbolt.ErrBucketNotFound
+			}
+			idxByID := tx.Bucket([]byte(db.BucketPRIndexByID))
+			idxByRG := tx.Bucket([]byte(db.BucketPRIndexByRG))
+			for _, item := range toWrite {
+				if err := b.Put([]byte(item.key), item.data); err != nil {
+					return err
+				}
+				if idxByID != nil && item.pr.ID != "" {
+					idxByID.Put([]byte(item.pr.ID), []byte(item.key))
+				}
+				if idxByRG != nil && item.pr.RepoGroup != "" {
+					rgKey := fmt.Sprintf("%s:%d", item.pr.RepoGroup, item.pr.PRNumber)
+					idxByRG.Put([]byte(rgKey), []byte(item.key))
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			slog.Error("failed to batch save PRs", "platform", platform, "repo", repo, "error", err)
+			failed += len(toWrite)
 		} else {
-			success++
+			success += len(toWrite)
 		}
 	}
 	return

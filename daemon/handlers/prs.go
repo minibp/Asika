@@ -56,13 +56,11 @@ func ListPRs(c *gin.Context) {
 		return
 	}
 
-	// Read PRs from local DB instead of remote API for fast response
-	_ = db.ForEach(db.BucketPRs, func(key, value []byte) error {
+	// Read PRs from local DB using index prefix scan for fast response
+	indexPrefix := repoGroup + ":"
+	_ = db.ForEachPrefix(db.BucketPRIndexByRG, db.BucketPRs, indexPrefix, func(key, value []byte) error {
 		var pr models.PRRecord
 		if err := json.Unmarshal(value, &pr); err != nil {
-			return nil
-		}
-		if pr.RepoGroup != repoGroup && pr.RepoGroup == "" {
 			return nil
 		}
 		if platform != "" && pr.Platform != platform {
@@ -246,25 +244,27 @@ func ApprovePR(c *gin.Context) {
 	// Try to get platform from DB first, fallback to repo group config
 	platform := getPlatformForGroup(group)
 	prNumber, err := strconv.Atoi(prID)
+	if err != nil || prNumber == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
+		return
+	}
 
 	key := repoGroup + "#" + prID
 	data, dbErr := db.Get(db.BucketPRs, key)
-	if dbErr == nil && data != nil {
-		var pr models.PRRecord
-		if json.Unmarshal(data, &pr) == nil && pr.Platform != "" {
-			platform = pr.Platform
-		}
-		if pr.PRNumber > 0 {
-			prNumber = pr.PRNumber
-		}
+	if dbErr != nil || data == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+		return
+	}
+	var dbPR models.PRRecord
+	if json.Unmarshal(data, &dbPR) == nil && dbPR.Platform != "" {
+		platform = dbPR.Platform
+	}
+	if dbPR.PRNumber > 0 {
+		prNumber = dbPR.PRNumber
 	}
 
 	if platform == "" {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
-		return
-	}
-	if err != nil || prNumber == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
 		return
 	}
 
@@ -396,25 +396,27 @@ func ClosePR(c *gin.Context) {
 
 	platform := getPlatformForGroup(group)
 	prNumber, err := strconv.Atoi(prID)
+	if err != nil || prNumber == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
+		return
+	}
 
 	key := repoGroup + "#" + prID
 	data, dbErr := db.Get(db.BucketPRs, key)
-	if dbErr == nil && data != nil {
-		var pr models.PRRecord
-		if json.Unmarshal(data, &pr) == nil && pr.Platform != "" {
-			platform = pr.Platform
-		}
-		if pr.PRNumber > 0 {
-			prNumber = pr.PRNumber
-		}
+	if dbErr != nil || data == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+		return
+	}
+	var pr models.PRRecord
+	if json.Unmarshal(data, &pr) == nil && pr.Platform != "" {
+		platform = pr.Platform
+	}
+	if pr.PRNumber > 0 {
+		prNumber = pr.PRNumber
 	}
 
 	if platform == "" {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
-		return
-	}
-	if err != nil || prNumber == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
 		return
 	}
 
@@ -466,25 +468,27 @@ func ReopenPR(c *gin.Context) {
 
 	platform := getPlatformForGroup(group)
 	prNumber, err := strconv.Atoi(prID)
+	if err != nil || prNumber == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
+		return
+	}
 
 	key := repoGroup + "#" + prID
 	data, dbErr := db.Get(db.BucketPRs, key)
-	if dbErr == nil && data != nil {
-		var pr models.PRRecord
-		if json.Unmarshal(data, &pr) == nil && pr.Platform != "" {
-			platform = pr.Platform
-		}
-		if pr.PRNumber > 0 {
-			prNumber = pr.PRNumber
-		}
+	if dbErr != nil || data == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+		return
+	}
+	var pr models.PRRecord
+	if json.Unmarshal(data, &pr) == nil && pr.Platform != "" {
+		platform = pr.Platform
+	}
+	if pr.PRNumber > 0 {
+		prNumber = pr.PRNumber
 	}
 
 	if platform == "" {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
-		return
-	}
-	if err != nil || prNumber == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
 		return
 	}
 
@@ -536,26 +540,28 @@ func MarkSpam(c *gin.Context) {
 
 	platform := getPlatformForGroup(group)
 	prNumber, err := strconv.Atoi(prID)
+	if err != nil || prNumber == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
+		return
+	}
 
 	key := repoGroup + "#" + prID
 	data, dbErr := db.Get(db.BucketPRs, key)
+	if dbErr != nil || data == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PR not found"})
+		return
+	}
 	var pr models.PRRecord
-	if dbErr == nil && data != nil {
-		json.Unmarshal(data, &pr)
-		if pr.Platform != "" {
-			platform = pr.Platform
-		}
-		if pr.PRNumber > 0 {
-			prNumber = pr.PRNumber
-		}
+	json.Unmarshal(data, &pr)
+	if pr.Platform != "" {
+		platform = pr.Platform
+	}
+	if pr.PRNumber > 0 {
+		prNumber = pr.PRNumber
 	}
 
 	if platform == "" {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "cannot determine platform"})
-		return
-	}
-	if err != nil || prNumber == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pr_id, must be a number"})
 		return
 	}
 
@@ -571,7 +577,6 @@ func MarkSpam(c *gin.Context) {
 		return
 	}
 
-	// Close the PR as spam
 	if err := client.ClosePR(c.Request.Context(), owner, repo, prNumber); err != nil {
 		slog.Error("failed to mark PR as spam", "error", err)
 		db.AppendAuditLog("error", "PR spam marking failed", map[string]interface{}{

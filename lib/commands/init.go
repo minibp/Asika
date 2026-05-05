@@ -58,7 +58,7 @@ the admin credentials interactively.`,
 				fmt.Printf("Error parsing TOML: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Println("Config loaded. Only admin credentials needed.\n")
+			fmt.Println("Config loaded. Only admin credentials needed.")
 		} else {
 			cfg = runInteractiveWizard(reader)
 		}

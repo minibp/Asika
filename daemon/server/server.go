@@ -73,7 +73,6 @@ func initCheckMiddleware() gin.HandlerFunc {
 		}
 
 		if skip {
-			slog.Info("initCheckMiddleware: skipping", "path", path)
 			c.Next()
 			return
 		}
