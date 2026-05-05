@@ -13,7 +13,6 @@
 <div class="form-group">
     <label>Repository Group:</label>
     <select id="repoGroupSelect" onchange="changePage(1)">
-        <option value="default">default</option>
     </select>
 </div>
 <div class="form-group">
@@ -60,17 +59,19 @@
                 const sel = document.getElementById('repoGroupSelect');
                 sel.innerHTML = '';
                 if (cfg.repo_groups && cfg.repo_groups.length > 0) {
-                    cfg.repo_groups.forEach(g => {
+                    cfg.repo_groups.forEach((g, i) => {
                         const opt = document.createElement('option');
                         opt.value = g.name;
                         opt.textContent = g.name;
+                        if (i === 0) opt.selected = true;
                         sel.appendChild(opt);
                     });
-                } else {
-                    const opt = document.createElement('option');
-                    opt.value = 'default';
-                    opt.textContent = 'default';
-                    sel.appendChild(opt);
+                    // If only one group, hide the selector
+                    if (cfg.repo_groups.length === 1) {
+                        sel.style.display = 'none';
+                        document.querySelector('label[for="repoGroupSelect"]').style.display = 'none';
+                    }
+                    loadPRs();
                 }
             }
         } catch (e) {}
@@ -113,7 +114,7 @@
                     }
                     actions += '<button class="btn btn-danger" onclick="closePR('+pr.pr_number+')" style="padding: 4px 8px; font-size: 12px;">Close</button>';
                 }
-                return '<tr><td>'+pr.pr_number+'</td><td><a href="/prs/'+pr.pr_number+'" style="color: #0066cc; text-decoration: none;">'+escapeHtml(pr.title)+'</a></td><td>'+escapeHtml(pr.author)+'</td><td>'+(pr.html_url?'<a href="'+escapeHtml(pr.html_url)+'" target="_blank" title="View on platform">'+escapeHtml(pr.platform)+' ↗</a>':escapeHtml(pr.platform))+'</td><td class="status-'+escapeHtml(pr.state)+'">'+escapeHtml(pr.state)+'</td><td>'+(pr.labels||[]).map(l=>'<span class="label">'+escapeHtml(l)+'</span>').join('')+'</td><td>'+actions+'</td></tr>';
+                return '<tr><td>'+pr.pr_number+'</td><td><a href="/repos/'+repoGroup+'/prs/'+pr.pr_number+'" style="color: #0066cc; text-decoration: none;">'+escapeHtml(pr.title)+'</a></td><td>'+escapeHtml(pr.author)+'</td><td>'+(pr.html_url?'<a href="'+escapeHtml(pr.html_url)+'" target="_blank" title="View on platform">'+escapeHtml(pr.platform)+' ↗</a>':escapeHtml(pr.platform))+'</td><td class="status-'+escapeHtml(pr.state)+'">'+escapeHtml(pr.state)+'</td><td>'+(pr.labels||[]).map(l=>'<span class="label">'+escapeHtml(l)+'</span>').join('')+'</td><td>'+actions+'</td></tr>';
             }).join('');
             } catch (e) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No PRs found</td></tr>'; }
         renderPagination();
@@ -157,7 +158,6 @@
         const repoGroup = document.getElementById('repoGroupSelect').value;
         if(confirm('Close PR #'+n+'?')){ await apiRequest('/api/v1/repos/'+repoGroup+'/prs/'+n+'/close',{method:'POST'}); loadPRs(); } }
     loadRepoGroups();
-    loadPRs();
 </script>
 {{template "client_auth"}}
 </body>

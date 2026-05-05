@@ -1,6 +1,14 @@
 # ChangeLog for Asika
 
 ## v20260505DEV
+- Fix ForEachPrefix using index key instead of value to fetch from target bucket (caused ListPRs returning empty)
+- Fix poller overwriting local-only fields (IsApproved, SpamFlag) during sync
+- Fix bots (telegram/discord/feishu) not adding approved PRs to merge queue
+- Fix self-update using checksums.txt and SHA256 instead of .sha512sum and SHA512 from release assets
+- Fix self-update asset name format (_ → -) to match release asset naming
+- Fix PR detail page repo_group hardcoded as "main" instead of dynamic from URL
+- Fix PR list page not auto-loading PRs when only one repo_group configured
+- Fix PR list page repo_group selector not hidden when only one group exists
 - Fix GitLab HasConflict: use mr.HasConflicts field instead of hardcoded false
 - Fix webhook permanent failure: notify all configured channels when retries exhausted
 - Fix PlatformNotifier client injection: wire via WirePlatformNotifiers() + InitNotifiers() at bootstrap

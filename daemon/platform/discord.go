@@ -317,7 +317,20 @@ func (b *DiscordBot) handleApprovePR(s *discordgo.Session, m *discordgo.MessageC
 		return
 	}
 
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("PR #%d approved.", pr.PRNumber))
+	pr.IsApproved = true
+	prData, _ := json.Marshal(pr)
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	if b.queueMgr != nil {
+		if err := b.queueMgr.AddToQueue(pr); err != nil {
+			slog.Warn("discord bot: failed to add PR to queue", "error", err, "pr_number", pr.PRNumber)
+		} else {
+			go b.queueMgr.CheckQueue()
+		}
+	}
+
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("PR #%d approved and added to merge queue.", pr.PRNumber))
 }
 
 // handleClosePR handles !close command

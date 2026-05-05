@@ -357,7 +357,21 @@ func (b *FeishuBot) doApprove(senderID, repoGroup, prID string) string {
 	if err := client.ApprovePR(context.Background(), owner, repo, pr.PRNumber); err != nil {
 		return fmt.Sprintf("Failed: %v", err)
 	}
-	return fmt.Sprintf("PR #%d approved.", pr.PRNumber)
+
+	pr.IsApproved = true
+	prData, _ := json.Marshal(pr)
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	if b.queueMgr != nil {
+		if err := b.queueMgr.AddToQueue(pr); err != nil {
+			slog.Warn("feishu bot: failed to add PR to queue", "error", err, "pr_number", pr.PRNumber)
+		} else {
+			go b.queueMgr.CheckQueue()
+		}
+	}
+
+	return fmt.Sprintf("PR #%d approved and added to merge queue.", pr.PRNumber)
 }
 
 func (b *FeishuBot) doClose(senderID, repoGroup, prID string) string {

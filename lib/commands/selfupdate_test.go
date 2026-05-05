@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -21,55 +21,44 @@ func TestVerifyChecksum(t *testing.T) {
 	dir := t.TempDir()
 
 	binaryData := []byte("fake binary content")
-	binaryPath := filepath.Join(dir, "asika_linux_amd64")
+	binaryPath := filepath.Join(dir, "asikad-linux-amd64")
 	if err := os.WriteFile(binaryPath, binaryData, 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	sum := sha256.Sum256(binaryData)
+	sum := sha512.Sum512(binaryData)
 	expectedSum := hex.EncodeToString(sum[:])
 
-	t.Run("valid checksum", func(t *testing.T) {
-		checksums := expectedSum + "  asika_linux_amd64\nothersum  otherfile\n"
-		checksumPath := filepath.Join(dir, "checksums.txt")
-		if err := os.WriteFile(checksumPath, []byte(checksums), 0644); err != nil {
+	t.Run("valid sha512sum", func(t *testing.T) {
+		// Standard sha512sum file format: "<hash>  <filename>"
+		checksumContent := expectedSum + "  asikad-linux-amd64\n"
+		checksumPath := filepath.Join(dir, "asikad-linux-amd64.sha512sum")
+		if err := os.WriteFile(checksumPath, []byte(checksumContent), 0644); err != nil {
 			t.Fatal(err)
 		}
-		if err := verifyChecksum(binaryPath, checksumPath, "asika_linux_amd64"); err != nil {
+		if err := verifyChecksum(binaryPath, checksumPath); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("mismatched checksum", func(t *testing.T) {
-		checksums := "0000000000000000000000000000000000000000000000000000000000000000  asika_linux_amd64\n"
-		checksumPath := filepath.Join(dir, "checksums_bad.txt")
-		if err := os.WriteFile(checksumPath, []byte(checksums), 0644); err != nil {
+		checksumContent := "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  asikad-linux-amd64\n"
+		checksumPath := filepath.Join(dir, "asikad-linux-amd64.sha512sum")
+		if err := os.WriteFile(checksumPath, []byte(checksumContent), 0644); err != nil {
 			t.Fatal(err)
 		}
-		if err := verifyChecksum(binaryPath, checksumPath, "asika_linux_amd64"); err == nil {
+		if err := verifyChecksum(binaryPath, checksumPath); err == nil {
 			t.Error("expected error for mismatched checksum")
 		}
 	})
 
-	t.Run("missing entry", func(t *testing.T) {
-		checksums := "abc123  other_file\n"
-		checksumPath := filepath.Join(dir, "checksums_missing.txt")
-		if err := os.WriteFile(checksumPath, []byte(checksums), 0644); err != nil {
+	t.Run("empty file", func(t *testing.T) {
+		checksumPath := filepath.Join(dir, "empty.sha512sum")
+		if err := os.WriteFile(checksumPath, []byte(""), 0644); err != nil {
 			t.Fatal(err)
 		}
-		if err := verifyChecksum(binaryPath, checksumPath, "asika_linux_amd64"); err == nil {
-			t.Error("expected error for missing entry")
-		}
-	})
-
-	t.Run("with SHA256 prefix in checksums", func(t *testing.T) {
-		checksums := "SHA256 (asika_linux_amd64) = " + expectedSum + "\n"
-		checksumPath := filepath.Join(dir, "checksums_prefix.txt")
-		if err := os.WriteFile(checksumPath, []byte(checksums), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if err := verifyChecksum(binaryPath, checksumPath, "asika_linux_amd64"); err != nil {
-			t.Errorf("unexpected error: %v", err)
+		if err := verifyChecksum(binaryPath, checksumPath); err == nil {
+			t.Error("expected error for empty checksum file")
 		}
 	})
 }

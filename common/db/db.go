@@ -140,8 +140,11 @@ func ForEachPrefix(indexBucket, targetBucket, prefix string, fn func(key, value 
 			return bbolt.ErrBucketNotFound
 		}
 		c := idxB.Cursor()
-		for k, _ := c.Seek([]byte(prefix)); k != nil && string(k[:min(len(k), len(prefix))]) == prefix; k, _ = c.Next() {
-			val := targetB.Get(k)
+		for k, v := c.Seek([]byte(prefix)); k != nil && string(k[:min(len(k), len(prefix))]) == prefix; k, v = c.Next() {
+			if v == nil {
+				continue
+			}
+			val := targetB.Get(v)
 			if val != nil {
 				if err := fn(k, val); err != nil {
 					return err

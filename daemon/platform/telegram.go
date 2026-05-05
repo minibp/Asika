@@ -333,7 +333,20 @@ func (b *TelegramBot) handleApprovePR(c telebot.Context) error {
 		return c.Send(fmt.Sprintf("Failed to approve PR: %v", err))
 	}
 
-	return c.Send(fmt.Sprintf("PR #%d approved.", pr.PRNumber))
+	pr.IsApproved = true
+	prData, _ := json.Marshal(pr)
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	if b.queueMgr != nil {
+		if err := b.queueMgr.AddToQueue(pr); err != nil {
+			slog.Warn("telegram bot: failed to add PR to queue", "error", err, "pr_number", pr.PRNumber)
+		} else {
+			go b.queueMgr.CheckQueue()
+		}
+	}
+
+	return c.Send(fmt.Sprintf("PR #%d approved and added to merge queue.", pr.PRNumber))
 }
 
 // handleClosePR handles /close command.
@@ -638,6 +651,15 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 		prData, _ := json.Marshal(pr)
 		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 		db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+		if b.queueMgr != nil {
+			if err := b.queueMgr.AddToQueue(pr); err != nil {
+				slog.Warn("telegram bot: failed to add PR to queue", "error", err, "pr_number", pr.PRNumber)
+			} else {
+				go b.queueMgr.CheckQueue()
+			}
+		}
+
 		c.Respond(&telebot.CallbackResponse{Text: "Approved ✅"})
 
 	case "close":

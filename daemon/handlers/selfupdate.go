@@ -2,7 +2,7 @@ package handlers
 
 import (
     "context"
-    "crypto/sha256"
+	"crypto/sha512"
     "encoding/hex"
     "fmt"
     "io"
@@ -111,7 +111,7 @@ func PerformWebUpdate(c *gin.Context) {
 	}
 
 	binaryName := "asikad"
-	assetName := fmt.Sprintf("%s_%s_%s", binaryName, runtime.GOOS, runtime.GOARCH)
+	assetName := fmt.Sprintf("%s-%s-%s", binaryName, runtime.GOOS, runtime.GOARCH)
 
 	downloadURL := ""
 	checksumURL := ""
@@ -119,7 +119,7 @@ func PerformWebUpdate(c *gin.Context) {
 		if asset.GetName() == assetName {
 			downloadURL = asset.GetBrowserDownloadURL()
 		}
-		if asset.GetName() == "checksums.txt" {
+		if asset.GetName() == assetName+".sha512sum" {
 			checksumURL = asset.GetBrowserDownloadURL()
 		}
 	}
@@ -147,32 +147,31 @@ func PerformWebUpdate(c *gin.Context) {
 		return
 	}
 
-	if checksumURL == "" {
-		sendEvent("error", `{"error":"checksums.txt asset not found, cannot verify download integrity"}`)
-		return
-	}
+	if checksumURL != "" {
+		sendEvent("progress", `{"status":"verifying","progress":100,"message":"Verifying checksum..."}`)
 
-	sendEvent("progress", `{"status":"verifying","progress":100,"message":"Verifying checksum..."}`)
-
-	checksumPath := filepath.Join(tmpDir, "checksums.txt")
-	resp, err := httpUpdateClient.Get(checksumURL)
-	if err != nil {
-		sendEvent("error", fmt.Sprintf(`{"error":"failed to download checksums: %s"}`, err.Error()))
-		return
-	}
-	f, err := os.Create(checksumPath)
-	if err != nil {
-		sendEvent("error", fmt.Sprintf(`{"error":"%s"}`, err.Error()))
+		checksumPath := filepath.Join(tmpDir, assetName+".sha512sum")
+		resp, err := httpUpdateClient.Get(checksumURL)
+		if err != nil {
+			sendEvent("error", fmt.Sprintf(`{"error":"failed to download checksum: %s"}`, err.Error()))
+			return
+		}
+		f, err := os.Create(checksumPath)
+		if err != nil {
+			sendEvent("error", fmt.Sprintf(`{"error":"%s"}`, err.Error()))
+			resp.Body.Close()
+			return
+		}
+		io.Copy(f, resp.Body)
+		f.Close()
 		resp.Body.Close()
-		return
-	}
-	io.Copy(f, resp.Body)
-	f.Close()
-	resp.Body.Close()
 
-	if err := verifyWebChecksum(binaryPath, checksumPath, assetName); err != nil {
-		sendEvent("error", fmt.Sprintf(`{"error":"checksum verification failed: %s"}`, err.Error()))
-		return
+		if err := verifyWebChecksum(binaryPath, checksumPath); err != nil {
+			sendEvent("error", fmt.Sprintf(`{"error":"checksum verification failed: %s"}`, err.Error()))
+			return
+		}
+	} else {
+		sendEvent("progress", `{"status":"verifying","progress":100,"message":"No checksum file available, skipping verification..."}`)
 	}
 
 	sendEvent("progress", `{"status":"installing","progress":100,"message":"Installing update..."}`)
@@ -261,55 +260,46 @@ func downloadWithProgress(url, dest string, sendEvent func(string, string)) erro
 	return nil
 }
 
-func verifyWebChecksum(binaryPath, checksumPath, assetName string) error {
-	checksums, err := os.ReadFile(checksumPath)
-	if err != nil {
-		return err
-	}
-
-	expected := ""
-	for _, line := range strings.Split(string(checksums), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.Contains(line, assetName) {
-			expected = parseChecksumLine(line)
-			if expected != "" {
-				break
-			}
-		}
-	}
-	if expected == "" {
-		return fmt.Errorf("no checksum entry for %s", assetName)
-	}
-
+func verifyWebChecksum(binaryPath, checksumPath string) error {
 	data, err := os.ReadFile(binaryPath)
 	if err != nil {
 		return err
 	}
-	hash := sha256.Sum256(data)
+	hash := sha512.Sum512(data)
 	actual := hex.EncodeToString(hash[:])
+
+	expected, err := parseSha512sumFile(checksumPath)
+	if err != nil {
+		return fmt.Errorf("cannot read checksum: %w", err)
+	}
+
 	if actual != expected {
 		return fmt.Errorf("checksum mismatch")
 	}
 	return nil
 }
 
+func parseSha512sumFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			return parts[0], nil
+		}
+	}
+	return "", fmt.Errorf("no valid checksum entry found")
+}
+
 func isValidGitHubDownloadURL(url string) bool {
 	return strings.HasPrefix(url, "https://github.com/") || strings.HasPrefix(url, "https://objects.githubusercontent.com/")
 }
 
-func parseChecksumLine(line string) string {
-	if strings.Contains(line, " = ") {
-		idx := strings.LastIndex(line, " = ")
-		if idx >= 0 {
-			return strings.TrimSpace(line[idx+3:])
-		}
-	}
-	parts := strings.Fields(line)
-	if len(parts) >= 1 {
-		return parts[0]
-	}
-	return ""
-}
+

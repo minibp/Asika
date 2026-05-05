@@ -159,6 +159,17 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 		if pr.ID == "" {
 			pr.ID = uuid.New().String()
 		}
+		// Preserve local-only fields from existing DB record
+		if data != nil {
+			var existing models.PRRecord
+			if json.Unmarshal(data, &existing) == nil {
+				pr.IsApproved = existing.IsApproved
+				pr.SpamFlag = existing.SpamFlag
+				if existing.CreatedAt.IsZero() == false && pr.CreatedAt.IsZero() {
+					pr.CreatedAt = existing.CreatedAt
+				}
+			}
+		}
 		prData, _ := json.Marshal(pr)
 		toWrite = append(toWrite, prSync{pr: pr, key: key, data: prData})
 	}

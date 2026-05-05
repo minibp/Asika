@@ -268,12 +268,12 @@ func (s *Server) setupRoutes() {
 			})
 		})
 
-		ssr.GET("/prs/:pr_id", func(c *gin.Context) {
+		ssr.GET("/repos/:repo_group/prs/:pr_id", func(c *gin.Context) {
 			user := c.GetString("username")
 			c.HTML(http.StatusOK, "pr_detail.html", gin.H{
 				"title":      "PR Detail - Asika",
 				"username":   user,
-				"repo_group": "main",
+				"repo_group": c.Param("repo_group"),
 				"pr_id":      c.Param("pr_id"),
 			})
 		})

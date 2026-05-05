@@ -2,7 +2,7 @@ package commands
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -108,8 +108,11 @@ func runSelfUpdate(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	assetName := fmt.Sprintf("%s_%s_%s", binaryName, runtime.GOOS, runtime.GOARCH)
-	downloadURL, checksumAsset := findAssets(release, assetName)
+	assetName := fmt.Sprintf("%s-%s-%s", binaryName, runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		assetName += ".exe"
+	}
+	downloadURL, checksumURL := findAssets(release, assetName)
 	if downloadURL == "" {
 		fmt.Fprintf(os.Stderr, "Error: no binary asset found for %s\n", assetName)
 		os.Exit(1)
@@ -137,18 +140,20 @@ func runSelfUpdate(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println("Download complete.")
 
-	if checksumAsset != "" {
+	if checksumURL != "" {
 		fmt.Println("Verifying checksum...")
-		checksumPath := filepath.Join(tmpDir, "checksums.txt")
-		if err := downloadFile(checksumAsset, checksumPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Error downloading checksums: %v\n", err)
+		checksumPath := filepath.Join(tmpDir, assetName+".sha512sum")
+		if err := downloadFile(checksumURL, checksumPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error downloading checksum: %v\n", err)
 			os.Exit(1)
 		}
-		if err := verifyChecksum(binaryPath, checksumPath, assetName); err != nil {
+		if err := verifyChecksum(binaryPath, checksumPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Checksum verification failed: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Println("Checksum OK.")
+	} else {
+		fmt.Printf("Warning: no .sha512sum found for %s, skipping checksum verification\n", assetName)
 	}
 
 	currentPath, err := os.Executable()
@@ -212,13 +217,13 @@ func fetchRelease(client *github.Client, tag string) (*github.RepositoryRelease,
 	return release, err
 }
 
-func findAssets(release *github.RepositoryRelease, binaryName string) (binaryURL, checksumURL string) {
+func findAssets(release *github.RepositoryRelease, assetName string) (binaryURL, checksumURL string) {
 	for _, asset := range release.Assets {
 		name := asset.GetName()
-		if name == binaryName {
+		if name == assetName {
 			binaryURL = asset.GetBrowserDownloadURL()
 		}
-		if name == "checksums.txt" {
+		if name == assetName+".sha512sum" {
 			checksumURL = asset.GetBrowserDownloadURL()
 		}
 	}
@@ -250,53 +255,42 @@ func downloadFile(url, dest string) error {
 	return err
 }
 
-func verifyChecksum(binaryPath, checksumPath, assetName string) error {
-	checksums, err := os.ReadFile(checksumPath)
-	if err != nil {
-		return fmt.Errorf("cannot read checksums: %w", err)
-	}
-
-	expected := ""
-	for _, line := range strings.Split(string(checksums), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.Contains(line, assetName) {
-			expected = parseChecksumLine(line, assetName)
-			if expected != "" {
-				break
-			}
-		}
-	}
-	if expected == "" {
-		return fmt.Errorf("no checksum entry for %s", assetName)
-	}
-
+func verifyChecksum(binaryPath, checksumPath string) error {
 	data, err := os.ReadFile(binaryPath)
 	if err != nil {
 		return err
 	}
-	hash := sha256.Sum256(data)
+	hash := sha512.Sum512(data)
 	actual := hex.EncodeToString(hash[:])
+
+	expected, err := parseSha512sumFile(checksumPath)
+	if err != nil {
+		return fmt.Errorf("cannot read checksum: %w", err)
+	}
+
 	if actual != expected {
 		return fmt.Errorf("checksum mismatch\nexpected: %s\nactual:   %s", expected, actual)
 	}
 	return nil
 }
 
-func parseChecksumLine(line, assetName string) string {
-	if strings.Contains(line, " = ") {
-		idx := strings.LastIndex(line, " = ")
-		if idx >= 0 {
-			return strings.TrimSpace(line[idx+3:])
+func parseSha512sumFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			return parts[0], nil
 		}
 	}
-	parts := strings.Fields(line)
-	if len(parts) >= 1 {
-		return parts[0]
-	}
-	return ""
+	return "", fmt.Errorf("no valid checksum entry found")
 }
 
 func copyFile(src, dst string) error {
