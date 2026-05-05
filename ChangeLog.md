@@ -1,6 +1,7 @@
 # ChangeLog for Asika
 
 ## v20260505DEV
+- Refactor cmd/asikad/main.go: move all init logic to daemon/server/core subpackage
 - Fix graceful shutdown: stop workers/bots before HTTP server, close DB last, exit 0 on signal
 - Add database init/close info logs, change PR fetch log to summary format (total/success/failed)
 - Add asika wizard command: interactive setup with --file support
