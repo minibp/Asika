@@ -98,6 +98,17 @@
         .card .table-wrapper:first-child { margin-top: -8px; }
     }
 
+    .pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 12px 0 0; }
+    .pagination-info { font-size: 13px; color: var(--text-secondary); }
+    .pagination-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+    .pagination-btns .btn { min-width: 32px; text-align: center; }
+    .pagination-btns .btn[disabled] { opacity: 1; cursor: default; }
+    .pagination-ellipsis { display: flex; align-items: center; padding: 0 4px; color: var(--text-secondary); font-size: 13px; }
+    @media (max-width: 480px) {
+        .pagination { flex-direction: column; align-items: flex-start; }
+        .pagination-btns { width: 100%; }
+    }
+
     /* Desktop only helpers */
     @media (min-width: 769px) {
         .table-wrapper { overflow-x: visible; }

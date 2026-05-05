@@ -12,13 +12,13 @@
 <h1>PR List</h1>
 <div class="form-group">
     <label>Repository Group:</label>
-    <select id="repoGroupSelect" onchange="loadPRs()">
+    <select id="repoGroupSelect" onchange="changePage(1)">
         <option value="default">default</option>
     </select>
 </div>
 <div class="form-group">
     <label>Filter by state:</label>
-    <select id="stateFilter" onchange="loadPRs()">
+    <select id="stateFilter" onchange="changePage(1)">
         <option value="open">Open</option>
         <option value="closed">Closed</option>
         <option value="merged">Merged</option>
@@ -44,10 +44,14 @@
         </tbody>
     </table>
     </div><!-- .table-wrapper -->
+    <div id="pagination" class="pagination"></div>
 </div>
 </div>
 {{template "scripts"}}
 <script>
+    var currentPage = 1;
+    var perPage = 20;
+    var totalPRs = 0;
     async function loadRepoGroups() {
         try {
             const resp = await apiRequest('/api/v1/config');
@@ -71,17 +75,34 @@
             }
         } catch (e) {}
     }
+    function changePage(page) {
+        currentPage = page;
+        loadPRs();
+    }
     async function loadPRs() {
         const repoGroup = document.getElementById('repoGroupSelect').value;
         const state = document.getElementById('stateFilter').value;
         const tbody = document.getElementById('prTableBody');
         tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Loading...</td></tr>';
         try {
-            const resp = await apiRequest('/api/v1/repos/' + repoGroup + '/prs' + (state ? '?state=' + state : ''));
+            var params = '?page=' + currentPage + '&per_page=' + perPage;
+            if (state) params += '&state=' + state;
+            const resp = await apiRequest('/api/v1/repos/' + repoGroup + '/prs' + params);
             const body = await resp.json();
             if (body.error) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #dc3545;">' + body.error + '</td></tr>'; return; }
-            const prs = Array.isArray(body) ? body : (body.data || []);
-            if (prs.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No PRs found</td></tr>'; return; }
+            var prs, total, page;
+            if (Array.isArray(body)) {
+                prs = body;
+                total = body.length;
+                page = 1;
+            } else {
+                prs = body.data || [];
+                total = body.total || 0;
+                page = body.page || 1;
+            }
+            totalPRs = total;
+            currentPage = page;
+            if (prs.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No PRs found</td></tr>'; renderPagination(); return; }
             tbody.innerHTML = prs.map(pr => {
                 let actions = '';
                 if (pr.state === 'open') {
@@ -95,7 +116,40 @@
                 return '<tr><td>'+pr.pr_number+'</td><td><a href="/prs/'+pr.pr_number+'" style="color: #0066cc; text-decoration: none;">'+escapeHtml(pr.title)+'</a></td><td>'+escapeHtml(pr.author)+'</td><td>'+(pr.html_url?'<a href="'+escapeHtml(pr.html_url)+'" target="_blank" title="View on platform">'+escapeHtml(pr.platform)+' ↗</a>':escapeHtml(pr.platform))+'</td><td class="status-'+escapeHtml(pr.state)+'">'+escapeHtml(pr.state)+'</td><td>'+(pr.labels||[]).map(l=>'<span class="label">'+escapeHtml(l)+'</span>').join('')+'</td><td>'+actions+'</td></tr>';
             }).join('');
             } catch (e) { tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No PRs found</td></tr>'; }
+        renderPagination();
+    }
+    function renderPagination() {
+        const el = document.getElementById('pagination');
+        const totalPages = Math.ceil(totalPRs / perPage);
+        if (totalPages <= 1) { el.innerHTML = ''; return; }
+        var html = '<span class="pagination-info">' + totalPRs + ' PRs, page ' + currentPage + ' of ' + totalPages + '</span>';
+        html += '<div class="pagination-btns">';
+        if (currentPage > 1) {
+            html += '<button class="btn btn-secondary btn-sm" onclick="changePage(' + (currentPage - 1) + ')">&laquo; Prev</button>';
         }
+        var start = Math.max(1, currentPage - 2);
+        var end = Math.min(totalPages, currentPage + 2);
+        if (start > 1) {
+            html += '<button class="btn btn-secondary btn-sm" onclick="changePage(1)">1</button>';
+            if (start > 2) html += '<span class="pagination-ellipsis">...</span>';
+        }
+        for (var i = start; i <= end; i++) {
+            if (i === currentPage) {
+                html += '<button class="btn btn-primary btn-sm" disabled>' + i + '</button>';
+            } else {
+                html += '<button class="btn btn-secondary btn-sm" onclick="changePage(' + i + ')">' + i + '</button>';
+            }
+        }
+        if (end < totalPages) {
+            if (end < totalPages - 1) html += '<span class="pagination-ellipsis">...</span>';
+            html += '<button class="btn btn-secondary btn-sm" onclick="changePage(' + totalPages + ')">' + totalPages + '</button>';
+        }
+        if (currentPage < totalPages) {
+            html += '<button class="btn btn-secondary btn-sm" onclick="changePage(' + (currentPage + 1) + ')">Next &raquo;</button>';
+        }
+        html += '</div>';
+        el.innerHTML = html;
+    }
     async function approvePR(n) {
         const repoGroup = document.getElementById('repoGroupSelect').value;
         if(confirm('Approve PR #'+n+'?')){ await apiRequest('/api/v1/repos/'+repoGroup+'/prs/'+n+'/approve',{method:'POST'}); loadPRs(); } }
