@@ -1,5 +1,15 @@
 # ChangeLog for Asika
 
+## v20260508DEV (2026-05-05)
+
+### Release Packaging
+- Package Linux binaries as .tar.gz including asika, asikad, service files (systemd/openrc), manpages, and HTML docs
+- Package macOS binaries as .tar.gz including asika, asikad, launchd plist, manpages, and HTML docs
+- Generate sha512sum checksums for asikad binaries only (all platforms)
+- Windows binaries remain as raw .exe files (no tarball)
+- Update all downstream jobs (deb/pkg/inno/docker) to extract from tarballs
+- release job uploads tar.gz, sha512sum, and exe assets to GitHub Release
+
 ## Unreleased
 - Remove systemd sd_notify integration (service uses Type=simple, no notification needed)
 - Replace ASCII architecture diagrams with Mermaid graphs in PROJECT.md

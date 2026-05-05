@@ -27,6 +27,13 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Checkout pack
+        uses: actions/checkout@v4
+        with:
+          repository: AsikaProject/pack
+          path: pack
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build binaries
         run: |
           mkdir -p bin
@@ -63,20 +70,59 @@ jobs:
             done
           done
 
-      - name: Generate checksums
+      - name: Package tarballs and generate checksums
         run: |
-          cd bin
-          sha256sum asikad-linux-* asika-linux-* > checksums.txt
-          cat checksums.txt
-          cd ..
+          TAG=${GITHUB_REF#refs/tags/v}
+          mkdir -p dist
+
+          for GOARCH in amd64 arm64; do
+            PKG="asika-linux-${GOARCH}"
+            mkdir -p "dist/${PKG}"
+            cp "bin/asikad-linux-${GOARCH}" "dist/${PKG}/asikad"
+            cp "bin/asika-linux-${GOARCH}" "dist/${PKG}/asika"
+            cp pack/templates/service/asikad.service "dist/${PKG}/"
+            cp pack/templates/service/asikad.openrc "dist/${PKG}/"
+            cp pack/doc/asika.1 "dist/${PKG}/"
+            cp pack/doc/asikad.1 "dist/${PKG}/"
+            cp pack/doc/asika.html "dist/${PKG}/"
+            cp pack/doc/asikad.html "dist/${PKG}/"
+            tar -czf "dist/${PKG}.tar.gz" -C dist "${PKG}"
+            sha512sum "bin/asikad-linux-${GOARCH}" > "dist/asikad-linux-${GOARCH}.sha512sum"
+          done
+
+          for GOARCH in amd64 arm64; do
+            PKG="asika-darwin-${GOARCH}"
+            mkdir -p "dist/${PKG}"
+            cp "bin/asikad-darwin-${GOARCH}" "dist/${PKG}/asikad"
+            cp "bin/asika-darwin-${GOARCH}" "dist/${PKG}/asika"
+            cp pack/templates/service/com.asika.daemon.plist "dist/${PKG}/"
+            cp pack/doc/asika.1 "dist/${PKG}/"
+            cp pack/doc/asikad.1 "dist/${PKG}/"
+            cp pack/doc/asika.html "dist/${PKG}/"
+            cp pack/doc/asikad.html "dist/${PKG}/"
+            tar -czf "dist/${PKG}.tar.gz" -C dist "${PKG}"
+            sha512sum "bin/asikad-darwin-${GOARCH}" > "dist/asikad-darwin-${GOARCH}.sha512sum"
+          done
+
+          PKG="asika-windows-amd64"
+          mkdir -p "dist/${PKG}"
+          cp "bin/asikad-windows-amd64.exe" "dist/${PKG}/asikad.exe"
+          cp "bin/asika-windows-amd64.exe" "dist/${PKG}/asika.exe"
+          cp pack/doc/asika.1 "dist/${PKG}/"
+          cp pack/doc/asikad.1 "dist/${PKG}/"
+          cp pack/doc/asika.html "dist/${PKG}/"
+          cp pack/doc/asikad.html "dist/${PKG}/"
+          tar -czf "dist/${PKG}.tar.gz" -C dist "${PKG}"
+          sha512sum "bin/asikad-windows-amd64.exe" > "dist/asikad-windows-amd64.sha512sum"
+
+          ls -lh dist/
 
       - uses: actions/upload-artifact@v6
         with:
           name: binaries
           path: |
-            bin/asikad-*
-            bin/asika-*
-            bin/checksums.txt
+            dist/*.tar.gz
+            dist/*.sha512sum
 
   package-deb:
     needs: build
@@ -103,10 +149,11 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Copy binaries
+      - name: Extract tarball
         run: |
-          cp bin/asika-linux-${{ matrix.goarch }} asika || true
-          cp bin/asikad-linux-${{ matrix.goarch }} asikad || true
+          tar -xzf bin/asika-linux-${{ matrix.goarch }}.tar.gz
+          cp asika-linux-${{ matrix.goarch }}/asika .
+          cp asika-linux-${{ matrix.goarch }}/asikad .
 
       - name: Package DEB
         run: bash pack/scripts/package-deb.sh
@@ -143,14 +190,10 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract binaries
+      - name: Extract tarball
         run: |
-          cd bin
-          for f in *.tar.gz; do
-            tar -xzf "$f"
-          done
-          cd ..
-          cp bin/asikad-darwin-${{ matrix.goarch }} asikad || true
+          tar -xzf bin/asika-darwin-${{ matrix.goarch }}.tar.gz
+          cp asika-darwin-${{ matrix.goarch }}/asikad .
 
       - name: Package PKG
         run: bash pack/scripts/package-pkg.sh
@@ -180,16 +223,12 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract binaries
+      - name: Extract tarball
         shell: bash
         run: |
-          cd bin
-          for f in *.tar.gz; do
-            tar -xzf "$f"
-          done
-          cd ..
-          cp bin/asika-windows-amd64.exe asika.exe || true
-          cp bin/asikad-windows-amd64.exe asikad.exe || true
+          tar -xzf bin/asika-windows-amd64.tar.gz
+          cp asika-windows-amd64/asika.exe .
+          cp asika-windows-amd64/asikad.exe .
 
       - name: Install Inno Setup
         shell: pwsh
@@ -226,15 +265,11 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract binaries
+      - name: Extract tarball
         run: |
-          cd bin
-          for f in *.tar.gz; do
-            tar -xzf "$f"
-          done
-          cd ..
-          cp bin/asika-linux-amd64 asika || true
-          cp bin/asikad-linux-amd64 asikad || true
+          tar -xzf bin/asika-linux-amd64.tar.gz
+          cp asika-linux-amd64/asika .
+          cp asika-linux-amd64/asikad .
 
       - name: Package Docker
         run: bash pack/scripts/package-docker.sh
@@ -252,10 +287,8 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          cd binaries
-          ls | grep -v '\.tar\.gz$' | xargs -I{} cp {} ../release-assets/
-          cd ..
-          ls release-assets/
+          cp binaries/*.tar.gz release-assets/
+          cp binaries/*.sha512sum release-assets/
           cp deb-packages/* release-assets/ 2>/dev/null || true
           cp pkg-packages/* release-assets/ 2>/dev/null || true
           cp inno-packages/* release-assets/ 2>/dev/null || true
