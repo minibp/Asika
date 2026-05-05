@@ -159,9 +159,11 @@ jobs:
 
       - name: Extract tarball
         run: |
-          tar -xzf bin/asika-linux-${{ matrix.goarch }}.tar.gz
-          cp asika-linux-${{ matrix.goarch }}/asika .
-          cp asika-linux-${{ matrix.goarch }}/asikad .
+          cd bin
+          tar -xzf asika-linux-${{ matrix.goarch }}.tar.gz
+          cp asika-linux-${{ matrix.goarch }}/asika .. || true
+          cp asika-linux-${{ matrix.goarch }}/asikad .. || true
+          cd ..
 
       - name: Package DEB
         run: bash pack/scripts/package-deb.sh
@@ -200,8 +202,10 @@ jobs:
 
       - name: Extract tarball
         run: |
-          tar -xzf bin/asika-darwin-${{ matrix.goarch }}.tar.gz
-          cp asika-darwin-${{ matrix.goarch }}/asikad .
+          cd bin
+          tar -xzf asika-darwin-${{ matrix.goarch }}.tar.gz
+          cp asika-darwin-${{ matrix.goarch }}/asikad .. || true
+          cd ..
 
       - name: Package PKG
         run: bash pack/scripts/package-pkg.sh
@@ -234,9 +238,11 @@ jobs:
       - name: Extract tarball
         shell: bash
         run: |
-          tar -xzf bin/asika-windows-amd64.tar.gz
-          cp asika-windows-amd64/asika.exe .
-          cp asika-windows-amd64/asikad.exe .
+          cd bin
+          tar -xzf asika-windows-amd64.tar.gz
+          cp asika-windows-amd64/asika.exe .. || true
+          cp asika-windows-amd64/asikad.exe .. || true
+          cd ..
 
       - name: Install Inno Setup
         shell: pwsh
@@ -275,9 +281,11 @@ jobs:
 
       - name: Extract tarball
         run: |
-          tar -xzf bin/asika-linux-amd64.tar.gz
-          cp asika-linux-amd64/asika .
-          cp asika-linux-amd64/asikad .
+          cd bin
+          tar -xzf asika-linux-amd64.tar.gz
+          cp asika-linux-amd64/asika .. || true
+          cp asika-linux-amd64/asikad .. || true
+          cd ..
 
       - name: Package Docker
         run: bash pack/scripts/package-docker.sh
