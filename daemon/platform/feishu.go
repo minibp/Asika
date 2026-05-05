@@ -355,6 +355,13 @@ func (b *FeishuBot) doApprove(senderID, repoGroup, prID string) string {
 	}
 	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
 	if err := client.ApprovePR(context.Background(), owner, repo, pr.PRNumber); err != nil {
+		db.AppendAuditLog("error", "PR approve failed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "feishu",
+			"error":      err.Error(),
+		})
 		return fmt.Sprintf("Failed: %v", err)
 	}
 
@@ -367,6 +374,14 @@ func (b *FeishuBot) doApprove(senderID, repoGroup, prID string) string {
 	prData, _ := json.Marshal(pr)
 	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("info", "PR approved", map[string]interface{}{
+		"pr_number":     pr.PRNumber,
+		"repo_group":    pr.RepoGroup,
+		"platform":      pr.Platform,
+		"actor":         "feishu",
+		"added_to_queue": true,
+	})
 
 	if b.queueMgr != nil {
 		if err := b.queueMgr.AddToQueue(pr); err != nil {
@@ -394,8 +409,28 @@ func (b *FeishuBot) doClose(senderID, repoGroup, prID string) string {
 	}
 	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
 	if err := client.ClosePR(context.Background(), owner, repo, pr.PRNumber); err != nil {
+		db.AppendAuditLog("error", "PR close failed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "feishu",
+			"error":      err.Error(),
+		})
 		return fmt.Sprintf("Failed: %v", err)
 	}
+
+	pr.State = "closed"
+	prData, _ := json.Marshal(pr)
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("info", "PR closed", map[string]interface{}{
+		"pr_number":  pr.PRNumber,
+		"repo_group": pr.RepoGroup,
+		"platform":   pr.Platform,
+		"actor":      "feishu",
+	})
+
 	return fmt.Sprintf("PR #%d closed.", pr.PRNumber)
 }
 
@@ -414,8 +449,29 @@ func (b *FeishuBot) doReopen(senderID, repoGroup, prID string) string {
 	}
 	owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
 	if err := client.ReopenPR(context.Background(), owner, repo, pr.PRNumber); err != nil {
+		db.AppendAuditLog("error", "PR reopen failed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "feishu",
+			"error":      err.Error(),
+		})
 		return fmt.Sprintf("Failed: %v", err)
 	}
+
+	pr.State = "open"
+	pr.SpamFlag = false
+	pr.UpdatedAt = time.Now()
+	data, _ := json.Marshal(pr)
+	db.PutPRWithIndex(fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("info", "PR reopened", map[string]interface{}{
+		"pr_number":  pr.PRNumber,
+		"repo_group": pr.RepoGroup,
+		"platform":   pr.Platform,
+		"actor":      "feishu",
+	})
+
 	return fmt.Sprintf("PR #%d reopened.", pr.PRNumber)
 }
 
@@ -424,19 +480,34 @@ func (b *FeishuBot) doMarkSpam(senderID, repoGroup, prID string) string {
 	if pr == nil {
 		return "PR not found."
 	}
-pr.SpamFlag = true
-    pr.State = "spam"
-    pr.UpdatedAt = time.Now()
-    key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
-    data, _ := json.Marshal(pr)
-    db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
+	pr.SpamFlag = true
+	pr.State = "spam"
+	pr.UpdatedAt = time.Now()
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	data, _ := json.Marshal(pr)
+	db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("warn", "PR marked as spam", map[string]interface{}{
+		"pr_number":  pr.PRNumber,
+		"repo_group": pr.RepoGroup,
+		"platform":   pr.Platform,
+		"actor":      "feishu",
+	})
 
 	group := config.GetRepoGroupByName(b.cfg, repoGroup)
 	if group != nil {
 		client := b.getClient(pr.Platform)
 		if client != nil {
 			owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
-			client.ClosePR(context.Background(), owner, repo, pr.PRNumber)
+			if err := client.ClosePR(context.Background(), owner, repo, pr.PRNumber); err != nil {
+				db.AppendAuditLog("error", "PR spam close failed", map[string]interface{}{
+					"pr_number":  pr.PRNumber,
+					"repo_group": pr.RepoGroup,
+					"platform":   pr.Platform,
+					"actor":      "feishu",
+					"error":      err.Error(),
+				})
+			}
 		}
 	}
 

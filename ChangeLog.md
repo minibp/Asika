@@ -1,11 +1,12 @@
 # ChangeLog for Asika
 
 ## Unreleased
-- Add audit log entries for Telegram bot actions (approve/close/reopen/spam)
+- Add audit log entries for all bot actions (Telegram/Discord/Feishu approve/close/reopen/spam)
+- Fix Discord/Feishu bot close/reopen not updating PR state in local DB
+- Fix Discord/Feishu bot reopen not clearing spam flag unconditionally
 - Add Telegram bot command menu (setMyCommands) for quick command access in UI
 - Add short commit hash to local build version (e.g. 20260505DEV-3e06b0f), fallback to "dev"; release builds remain clean
 - Add tests for multi-group close/reopen/spam isolation and repo resolution
-- Add audit log entries for Telegram bot actions (approve/close/reopen/spam)
 
 ## v20260505DEV
 - Fix ForEachPrefix using index key instead of value to fetch from target bucket (caused ListPRs returning empty)

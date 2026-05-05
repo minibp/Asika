@@ -313,6 +313,13 @@ func (b *DiscordBot) handleApprovePR(s *discordgo.Session, m *discordgo.MessageC
 	ctx := context.Background()
 	if err := client.ApprovePR(ctx, owner, repo, pr.PRNumber); err != nil {
 		slog.Error("discord bot: approve failed", "error", err)
+		db.AppendAuditLog("error", "PR approve failed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "discord",
+			"error":      err.Error(),
+		})
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Failed to approve PR: %v", err))
 		return
 	}
@@ -326,6 +333,14 @@ func (b *DiscordBot) handleApprovePR(s *discordgo.Session, m *discordgo.MessageC
 	prData, _ := json.Marshal(pr)
 	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("info", "PR approved", map[string]interface{}{
+		"pr_number":     pr.PRNumber,
+		"repo_group":    pr.RepoGroup,
+		"platform":      pr.Platform,
+		"actor":         "discord",
+		"added_to_queue": true,
+	})
 
 	if b.queueMgr != nil {
 		if err := b.queueMgr.AddToQueue(pr); err != nil {
@@ -370,9 +385,28 @@ func (b *DiscordBot) handleClosePR(s *discordgo.Session, m *discordgo.MessageCre
 
 	ctx := context.Background()
 	if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+		db.AppendAuditLog("error", "PR close failed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "discord",
+			"error":      err.Error(),
+		})
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Failed to close PR: %v", err))
 		return
 	}
+
+	pr.State = "closed"
+	prData, _ := json.Marshal(pr)
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("info", "PR closed", map[string]interface{}{
+		"pr_number":  pr.PRNumber,
+		"repo_group": pr.RepoGroup,
+		"platform":   pr.Platform,
+		"actor":      "discord",
+	})
 
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("PR #%d closed.", pr.PRNumber))
 }
@@ -409,17 +443,29 @@ func (b *DiscordBot) handleReopenPR(s *discordgo.Session, m *discordgo.MessageCr
 
 	ctx := context.Background()
 	if err := client.ReopenPR(ctx, owner, repo, pr.PRNumber); err != nil {
+		db.AppendAuditLog("error", "PR reopen failed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "discord",
+			"error":      err.Error(),
+		})
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Failed to reopen PR: %v", err))
 		return
 	}
 
-	if pr.SpamFlag {
-		pr.State = "open"
-		pr.SpamFlag = false
-		pr.UpdatedAt = time.Now()
-		data, _ := json.Marshal(pr)
-		db.PutPRWithIndex(fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data, pr.ID, pr.RepoGroup, pr.PRNumber)
-	}
+	pr.State = "open"
+	pr.SpamFlag = false
+	pr.UpdatedAt = time.Now()
+	data, _ := json.Marshal(pr)
+	db.PutPRWithIndex(fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("info", "PR reopened", map[string]interface{}{
+		"pr_number":  pr.PRNumber,
+		"repo_group": pr.RepoGroup,
+		"platform":   pr.Platform,
+		"actor":      "discord",
+	})
 
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("PR #%d reopened.", pr.PRNumber))
 }
@@ -448,12 +494,27 @@ func (b *DiscordBot) handleMarkSpam(s *discordgo.Session, m *discordgo.MessageCr
 	data, _ := json.Marshal(pr)
 	db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
 
+	db.AppendAuditLog("warn", "PR marked as spam", map[string]interface{}{
+		"pr_number":  pr.PRNumber,
+		"repo_group": pr.RepoGroup,
+		"platform":   pr.Platform,
+		"actor":      "discord",
+	})
+
 	group := config.GetRepoGroupByName(b.cfg, repoGroup)
 	if group != nil {
 		client := b.getClientForPlatform(pr.Platform)
 		if client != nil {
 			owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
-			client.ClosePR(context.Background(), owner, repo, pr.PRNumber)
+			if err := client.ClosePR(context.Background(), owner, repo, pr.PRNumber); err != nil {
+				db.AppendAuditLog("error", "PR spam close failed", map[string]interface{}{
+					"pr_number":  pr.PRNumber,
+					"repo_group": pr.RepoGroup,
+					"platform":   pr.Platform,
+					"actor":      "discord",
+					"error":      err.Error(),
+				})
+			}
 		}
 	}
 
