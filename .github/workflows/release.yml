@@ -204,8 +204,10 @@ jobs:
         run: |
           cd bin
           tar -xzf asika-darwin-${{ matrix.goarch }}.tar.gz
-          cp asika-darwin-${{ matrix.goarch }}/asikad .. || true
+          cp asika-darwin-${{ matrix.goarch }}/asikad asikad-darwin-${{ matrix.goarch }}
           cd ..
+          # package-pkg.sh expects binary in bin/
+          ls -la bin/
 
       - name: Package PKG
         run: bash pack/scripts/package-pkg.sh
@@ -256,10 +258,18 @@ jobs:
         env:
           TAG_NAME: ${{ github.ref_name }}
 
+      - name: Move Inno output to dist/
+        shell: bash
+        run: |
+          mkdir -p dist
+          mv inno-build/Output/*-setup.exe dist/ 2>/dev/null || \
+          mv inno-build/Output/*.exe dist/asika-${{ github.ref_name }}-setup.exe 2>/dev/null || true
+          ls -la dist/ 2>/dev/null || true
+
       - uses: actions/upload-artifact@v6
         with:
           name: inno-packages
-          path: Output/*-setup.exe
+          path: dist/*-setup.exe
 
   package-docker:
     needs: build
