@@ -253,7 +253,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: inno-packages
-          path: dist/*-setup.exe
+          path: Output/*-setup.exe
 
   package-docker:
     needs: build
