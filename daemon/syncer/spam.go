@@ -20,13 +20,15 @@ import (
 type SpamDetector struct {
 	cfg     *models.Config
 	clients map[platforms.PlatformType]platforms.PlatformClient
+	stop    chan struct{}
 }
 
 // NewSpamDetector creates a new spam detector
 func NewSpamDetector(cfg *models.Config) *SpamDetector {
 	// Clients are set later via SetClients
 	return &SpamDetector{
-		cfg: cfg,
+		cfg:  cfg,
+		stop: make(chan struct{}),
 	}
 }
 
@@ -35,6 +37,7 @@ func NewSpamDetectorWithClients(cfg *models.Config, clients map[platforms.Platfo
 	return &SpamDetector{
 		cfg:     cfg,
 		clients: clients,
+		stop:    make(chan struct{}),
 	}
 }
 
@@ -183,6 +186,18 @@ func (d *SpamDetector) sendSpamNotification(pr *models.PRRecord) {
 			slog.Error("notification failed", "type", nc.Type, "error", err)
 		}
 	}
+}
+
+// Stop signals the periodic scan goroutine to stop.
+func (d *SpamDetector) Stop() {
+	if d.stop != nil {
+		close(d.stop)
+	}
+}
+
+// StopChan returns the stop channel for external select loops.
+func (d *SpamDetector) StopChan() <-chan struct{} {
+	return d.stop
 }
 
 // parseDuration parses a duration string with fallback

@@ -19,6 +19,7 @@ type Manager struct {
 	cfg     *models.Config
 	clients map[platforms.PlatformType]platforms.PlatformClient
 	checker *Checker
+	stop    chan struct{}
 }
 
 // NewManager creates a new queue manager
@@ -27,6 +28,7 @@ func NewManager(cfg *models.Config, clients map[platforms.PlatformType]platforms
 		cfg:     cfg,
 		clients: clients,
 		checker: NewChecker(cfg, clients),
+		stop:    make(chan struct{}),
 	}
 }
 
@@ -258,4 +260,15 @@ func (m *Manager) GetQueueItems(repoGroup string) ([]models.QueueItem, error) {
 		return nil
 	})
 	return items, err
+}
+// Stop signals the periodic checker goroutine to stop.
+func (m *Manager) Stop() {
+	if m.stop != nil {
+		close(m.stop)
+	}
+}
+
+// StopChan returns the stop channel for external select loops.
+func (m *Manager) StopChan() <-chan struct{} {
+	return m.stop
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -112,21 +113,22 @@ func main() {
     // Initialize event bus (must be before PR fetch to avoid panic)
     events.Init()
 
-    // Initial PR fetch: fetch all PRs from platforms after events init
-    slog.Info("performing initial PR fetch before starting server...")
-    if cfg.Events.Mode == "polling" {
-        poller := polling.NewPoller(cfg, clients)
-        poller.PollOnce() // Synchronous initial fetch
-        slog.Info("initial PR fetch complete")
-        // Start background polling
-        go poller.Start()
-        slog.Info("background poller started")
-    } else {
-        // Even in webhook mode, do an initial fetch
-        poller := polling.NewPoller(cfg, clients)
-        poller.PollOnce()
-        slog.Info("initial PR fetch complete (webhook mode)")
-    }
+     // Initial PR fetch: fetch all PRs from platforms after events init
+     slog.Info("performing initial PR fetch before starting server...")
+     var poller *polling.Poller
+     if cfg.Events.Mode == "polling" {
+         poller = polling.NewPoller(cfg, clients)
+         poller.PollOnce() // Synchronous initial fetch
+         slog.Info("initial PR fetch complete")
+         // Start background polling
+         go poller.Start()
+         slog.Info("background poller started")
+     } else {
+         // Even in webhook mode, do an initial fetch
+         poller = polling.NewPoller(cfg, clients)
+         poller.PollOnce()
+         slog.Info("initial PR fetch complete (webhook mode)")
+     }
 
     // Setup SIGHUP handler for config reload
     setupSIGHUPHandler()
@@ -136,18 +138,25 @@ func main() {
         platforms.ExitOnCheckFailed(err)
     }
 
-	// Start merge queue manager and periodic checker
-	queueMgr := queue.NewManager(cfg, clients)
-	handlers.InitQueueMgr(queueMgr)
-	syncr := syncer.NewSyncer(cfg, clients)
-	handlers.InitSyncer(syncr)
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		for range ticker.C {
-			queueMgr.CheckQueue()
-		}
-	}()
-	slog.Info("merge queue checker started")
+ 	// Start merge queue manager and periodic checker
+ 	queueMgr := queue.NewManager(cfg, clients)
+ 	handlers.InitQueueMgr(queueMgr)
+ 	syncr := syncer.NewSyncer(cfg, clients)
+ 	handlers.InitSyncer(syncr)
+ 	go func() {
+ 		ticker := time.NewTicker(30 * time.Second)
+ 		defer ticker.Stop()
+ 		for {
+ 			select {
+ 			case <-ticker.C:
+ 				queueMgr.CheckQueue()
+ 			case <-queueMgr.StopChan():
+ 				slog.Info("merge queue checker stopped")
+ 				return
+ 			}
+ 		}
+ 	}()
+ 	slog.Info("merge queue checker started")
 
     // Start spam detector periodic scan
     spamDetector := syncer.NewSpamDetectorWithClients(cfg, clients)
@@ -157,9 +166,16 @@ func main() {
         }
         window := parseDurationDefault(cfg.Spam.TimeWindow, 10*time.Minute)
         ticker := time.NewTicker(window / 2)
-        for range ticker.C {
-            spamDetector.Scan()
-        }
+        defer ticker.Stop()
+         for {
+            select {
+            case <-ticker.C:
+                spamDetector.Scan()
+            case <-spamDetector.StopChan():
+                slog.Info("spam detector stopped")
+                return
+            }
+         }
     }()
     slog.Info("spam detector started", "enabled", cfg.Spam.Enabled)
 
@@ -168,11 +184,11 @@ func main() {
     go eventConsumer.Start()
     slog.Info("event consumer started")
 
-    // Start Telegram bot (interactive decisions + notifications)
-    startTelegramBot(cfg, clients, queueMgr, syncr, spamDetector)
+     // Start Telegram bot (interactive decisions + notifications)
+     tgBot := startTelegramBot(cfg, clients, queueMgr, syncr, spamDetector)
 
-    // Start Feishu bot (interactive decisions + notifications)
-    startFeishuBot(cfg, clients, queueMgr, syncr, spamDetector)
+     // Start Feishu bot (interactive decisions + notifications)
+     fsBot := startFeishuBot(cfg, clients, queueMgr, syncr, spamDetector)
 
 	// Create and start server
 	srv := server.NewServer(cfg, clients)
@@ -198,21 +214,44 @@ func main() {
 		}()
 	}
 
-	// Start server in background so we can handle shutdown signals
-	go func() {
-		if err := srv.Start(); err != nil {
-			slog.Error("server failed", "error", err)
-			os.Exit(1)
-		}
-	}()
+ 	// Start server in background so we can handle shutdown signals
+ 	go func() {
+ 		if err := srv.Start(); err != nil {
+ 			if err == http.ErrServerClosed {
+ 				slog.Info("http server closed")
+ 			} else {
+ 				slog.Error("server failed", "error", err)
+ 				os.Exit(1)
+ 			}
+ 		}
+ 	}()
 
 	// Wait for shutdown signal
 	sig := <-sigChan
 	slog.Info("received signal, shutting down", "signal", sig)
+
+	// 1. Stop background workers (stop writing to DB)
+	queueMgr.Stop()
+	spamDetector.Stop()
+	eventConsumer.Stop()
+	poller.Stop()
+
+	// 2. Stop platform bots
+	if tgBot != nil {
+		tgBot.Stop()
+	}
+	if fsBot != nil {
+		fsBot.Stop()
+	}
+
+	// 3. Stop HTTP server (finish in-flight requests)
 	if err := srv.Stop(); err != nil {
 		slog.Error("server stop error", "error", err)
 	}
+
+	// 4. Close DB (release locks)
 	db.Close()
+
 	slog.Info("shutdown complete")
 	os.Exit(0)
 }
@@ -268,15 +307,16 @@ func parseDurationDefault(s string, defaultDur time.Duration) time.Duration {
 }
 
 // startTelegramBot starts the Telegram interactive bot if configured.
+// Returns the bot instance (or nil if not configured), so it can be stopped on shutdown.
 func startTelegramBot(
 	cfg *models.Config,
 	clients map[platforms.PlatformType]platforms.PlatformClient,
 	queueMgr *queue.Manager,
 	syncr *syncer.Syncer,
 	spamDetector *syncer.SpamDetector,
-) {
+) *platform.TelegramBot {
 	if cfg == nil || !cfg.Telegram.Enabled || cfg.Telegram.Token == "" {
-		return
+		return nil
 	}
 
 	pref := telebot.Settings{
@@ -287,7 +327,7 @@ func startTelegramBot(
 	bot, err := telebot.NewBot(pref)
 	if err != nil {
 		slog.Error("failed to create telegram bot", "error", err)
-		return
+		return nil
 	}
 
 	// Find or create the TelegramNotifier for notification sending
@@ -328,6 +368,7 @@ func startTelegramBot(
 
 	go tgBot.Start()
 	slog.Info("telegram bot started", "admin_ids", len(cfg.Telegram.AdminIDs))
+	return tgBot
 }
 
 func toStringList(strings []string) []interface{} {
@@ -339,15 +380,16 @@ func toStringList(strings []string) []interface{} {
 }
 
 // startFeishuBot starts the Feishu interactive bot if configured.
+// Returns the bot instance (or nil if not configured), so it can be stopped on shutdown.
 func startFeishuBot(
 	cfg *models.Config,
 	clients map[platforms.PlatformType]platforms.PlatformClient,
 	queueMgr *queue.Manager,
 	syncr *syncer.Syncer,
 	spamDetector *syncer.SpamDetector,
-) {
+) *platform.FeishuBot {
 	if cfg == nil || !cfg.Feishu.Enabled || cfg.Feishu.AppID == "" {
-		return
+		return nil
 	}
 
 	// Create feishu notifier
@@ -371,6 +413,7 @@ func startFeishuBot(
 
 	go fsBot.Start()
 	slog.Info("feishu bot started", "app_id", cfg.Feishu.AppID)
+	return fsBot
 }
 
 // serverURL builds a browser URL from a listen address.
