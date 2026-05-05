@@ -648,6 +648,15 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: msg})
 		}
 		pr.IsApproved = true
+		actor := c.Sender().Username
+		if actor == "" {
+			actor = fmt.Sprintf("%d", c.Sender().ID)
+		}
+		pr.Events = append(pr.Events, models.PREvent{
+			Timestamp: time.Now(),
+			Action:    "approved",
+			Actor:     actor,
+		})
 		prData, _ := json.Marshal(pr)
 		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 		db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)

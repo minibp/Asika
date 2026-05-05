@@ -359,6 +359,11 @@ func (b *FeishuBot) doApprove(senderID, repoGroup, prID string) string {
 	}
 
 	pr.IsApproved = true
+	pr.Events = append(pr.Events, models.PREvent{
+		Timestamp: time.Now(),
+		Action:    "approved",
+		Actor:     senderID,
+	})
 	prData, _ := json.Marshal(pr)
 	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)

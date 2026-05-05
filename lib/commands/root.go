@@ -99,9 +99,11 @@ func handleResponse(resp *http.Response, emptyMsg string) []interface{} {
 			}
 			if d, ok := obj["data"].([]interface{}); ok {
 				data = d
-			}
-			if len(data) == 0 {
-				// Single object response, print it directly
+				if len(data) == 0 {
+					fmt.Println(emptyMsg)
+					return nil
+				}
+			} else {
 				b, _ := json.MarshalIndent(obj, "", "  ")
 				fmt.Println(string(b))
 				return []interface{}{obj}

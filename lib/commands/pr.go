@@ -190,7 +190,7 @@ func init() {
 	prCmd.AddCommand(prBatchCloseCmd)
 	prCmd.AddCommand(prBatchLabelCmd)
 
-	prListCmd.Flags().String("state", "open", "Filter by state")
+	prListCmd.Flags().String("state", "", "Filter by state")
 	prListCmd.Flags().String("platform", "", "Filter by platform")
 	prSpamCmd.Flags().Bool("undo", false, "Remove spam mark")
 	prBatchLabelCmd.Flags().String("label", "", "Label to add (required)")
