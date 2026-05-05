@@ -1,6 +1,22 @@
 # ChangeLog for Asika
 
 ## Unreleased
+- **WeCom notifier improvements:**
+  - Replace manual JSON escaping with `encoding/json` (fixes malformed JSON with special characters)
+  - Add configurable HTTP client timeout (10s) instead of unlimited `http.DefaultClient`
+  - Add response body safety read with 1 MB limit (`io.LimitReader`)
+  - Add exponential backoff retry (up to 3 attempts: 1s/2s/4s) for transient failures
+  - Add WeCom API `errcode`/`errmsg` response parsing for proper error reporting
+  - Support multiple webhook targets via `webhook_urls` array (backward compatible with `webhook_url`)
+  - Support three message formats: `markdown` (default), `textcard`, `text` via `msg_type` config
+  - Add @mention support: `mentioned_list` (user IDs) and `mentioned_mobile_list` (phone numbers)
+  - Add WeCom App Message API mode (`corp_id` + `corp_secret` + `agent_id`) for proactive push
+  - Add app mode recipient targeting: `to_user`, `to_party`, `to_tag`
+  - Add automatic access token refresh with expiry caching for app mode
+  - Add structured PR notification template (`SendPR` + `formatPRBody`)
+  - Add URL redaction in logs (webhook key shown as `***`)
+  - Add `signWebhookHMAC` utility for HMAC-SHA256 webhook signing
+  - Validate config at construction time (app mode missing params falls back to webhook-only)
 - Add audit log entries for all bot actions (Telegram/Discord/Feishu approve/close/reopen/spam)
 - Fix Discord/Feishu bot close/reopen not updating PR state in local DB
 - Fix Discord/Feishu bot reopen not clearing spam flag unconditionally

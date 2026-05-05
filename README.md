@@ -250,7 +250,7 @@ trigger_on_title_kw = ["spam", "fix typo", "readme update"]
 
 ### Notifications
 
-Get alerts where you work:
+Get alerts where you work. Supports multiple channels simultaneously — just add more `[[notify]]` blocks.
 
 ```toml
 # Email
@@ -259,10 +259,30 @@ type   = "smtp"
 config = { host = "smtp.example.com", port = 587, username = "bot@example.com",
            password = "xxx", to = ["team@example.com"] }
 
-# WeCom
+# WeCom — Webhook mode (single URL)
 [[notify]]
 type   = "wecom"
-config = { webhook_url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx" }
+[notify.config]
+webhook_url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+
+# WeCom — Webhook mode (multiple URLs + @mentions + textcard)
+[[notify]]
+type   = "wecom"
+[notify.config]
+webhook_urls = ["https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx", "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=yyy"]
+mentioned_list = ["zhangsan", "lisi"]
+mentioned_mobile_list = ["13800138000"]
+msg_type = "textcard"  # "markdown" (default), "textcard", "text"
+
+# WeCom — App mode (proactive push to users/parties/tags)
+[[notify]]
+type   = "wecom"
+[notify.config]
+corp_id = "wwxxxxxxxxxx"
+corp_secret = "xxxxxxxx"
+agent_id = 1000001
+to_user = ["zhangsan", "lisi"]
+msg_type = "textcard"
 
 # GitHub @mentions
 [[notify]]
@@ -294,3 +314,5 @@ BSD 3-Clause — see [LICENSE.md](LICENSE.md) for details.
 Found a bug? Want a feature? [Open an issue](https://github.com/minibp/asika/issues).
 
 For detailed technical docs, see `PROJECT.md` (for developers) and `asika.toml.example` (for configuration).
+
+See [ChangeLog](./ChangeLog.md) for the full release history.
