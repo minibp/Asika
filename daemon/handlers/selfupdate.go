@@ -73,6 +73,10 @@ func PerformWebUpdate(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "web update is disabled"})
 		return
 	}
+	if version.Enabled != "true" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "self-update not available on this platform"})
+		return
+	}
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")

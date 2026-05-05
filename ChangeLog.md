@@ -2,7 +2,7 @@
 
 ## Unreleased
 - Remove systemd sd_notify integration (service uses Type=simple, no notification needed)
-- Fix some security issues
+- Replace ASCII architecture diagrams with Mermaid graphs in PROJECT.md
 - Fix GitLab HasConflict: use mr.HasConflicts field instead of hardcoded false
 - Fix webhook permanent failure: notify all configured channels when retries exhausted
 - Fix PlatformNotifier client injection: wire via WirePlatformNotifiers() + InitNotifiers() at bootstrap

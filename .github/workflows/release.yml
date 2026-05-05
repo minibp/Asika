@@ -39,18 +39,26 @@ jobs:
               EXT=""
               [ "$GOOS" = "windows" ] && EXT=".exe"
               NAME="asikad-${GOOS}-${GOARCH}${EXT}"
-              echo "Building $name..."
+              echo "Building $NAME..."
+              LDFLAGS="-s -w -X 'asika/common/version.Version=$TAG'"
+              if [ "$GOOS" = "linux" ]; then
+                LDFLAGS="$LDFLAGS -X 'asika/common/version.Enabled=true'"
+              fi
               GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 \
-                go build -ldflags="-s -w -X 'asika/common/version.Version=$TAG'" \
+                go build -ldflags="$LDFLAGS" \
                 -o "bin/$NAME" ./cmd/asikad
             done
           done
           for GOOS in linux darwin; do
             for GOARCH in amd64 arm64; do
               NAME="asika-${GOOS}-${GOARCH}"
-              echo "Building $name..."
+              echo "Building $NAME..."
+              LDFLAGS="-s -w -X 'asika/common/version.Version=$TAG'"
+              if [ "$GOOS" = "linux" ]; then
+                LDFLAGS="$LDFLAGS -X 'asika/common/version.Enabled=true'"
+              fi
               GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 \
-                go build -ldflags="-s -w -X 'asika/common/version.Version=$TAG'" \
+                go build -ldflags="$LDFLAGS" \
                 -o "bin/$NAME" ./cmd/asika
             done
           done
@@ -58,7 +66,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd bin
-          sha256sum asikad-* asika-* > checksums.txt
+          sha256sum asikad-linux-* asika-linux-* > checksums.txt
           cat checksums.txt
           cd ..
 
@@ -135,8 +143,13 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Copy binaries
+      - name: Extract binaries
         run: |
+          cd bin
+          for f in *.tar.gz; do
+            tar -xzf "$f"
+          done
+          cd ..
           cp bin/asikad-darwin-${{ matrix.goarch }} asikad || true
 
       - name: Package PKG
@@ -167,9 +180,14 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Copy binaries
+      - name: Extract binaries
         shell: bash
         run: |
+          cd bin
+          for f in *.tar.gz; do
+            tar -xzf "$f"
+          done
+          cd ..
           cp bin/asika-windows-amd64.exe asika.exe || true
           cp bin/asikad-windows-amd64.exe asikad.exe || true
 
@@ -208,8 +226,13 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Copy binaries
+      - name: Extract binaries
         run: |
+          cd bin
+          for f in *.tar.gz; do
+            tar -xzf "$f"
+          done
+          cd ..
           cp bin/asika-linux-amd64 asika || true
           cp bin/asikad-linux-amd64 asikad || true
 
@@ -229,7 +252,10 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          cp binaries/asikad-* binaries/asika-* binaries/checksums.txt release-assets/ 2>/dev/null || true
+          cd binaries
+          ls | grep -v '\.tar\.gz$' | xargs -I{} cp {} ../release-assets/
+          cd ..
+          ls release-assets/
           cp deb-packages/* release-assets/ 2>/dev/null || true
           cp pkg-packages/* release-assets/ 2>/dev/null || true
           cp inno-packages/* release-assets/ 2>/dev/null || true
