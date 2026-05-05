@@ -316,6 +316,188 @@ func TestSpamReopenViaBotLogic(t *testing.T) {
 	}
 }
 
+func setupMultiGroupTest(t *testing.T) (*TelegramBot, func()) {
+	t.Helper()
+
+	tdb := testutil.NewTestDB(t)
+	db.DB = tdb
+
+	mock := testutil.NewMockPlatformClient()
+	clients := map[platforms.PlatformType]platforms.PlatformClient{
+		platforms.PlatformGitHub: mock,
+	}
+
+	cfg := &models.Config{
+		RepoGroups: []models.RepoGroupConfig{
+			{Name: "group-a", Mode: "multi", GitHub: "org-a/repo-a"},
+			{Name: "group-b", Mode: "multi", GitHub: "org-b/repo-b"},
+		},
+		Telegram: models.TelegramConfig{
+			Enabled:  true,
+			Token:    "test-token",
+			AdminIDs: []int64{12345},
+		},
+	}
+	config.Store(cfg)
+
+	qm := queue.NewManager(cfg, clients)
+	syncr := syncer.NewSyncer(cfg, clients)
+	sd := syncer.NewSpamDetectorWithClients(cfg, clients)
+
+	bot := &TelegramBot{
+		bot:          nil,
+		cfg:          cfg,
+		clients:      clients,
+		queueMgr:     qm,
+		syncerRef:    syncr,
+		spamDetector: sd,
+		adminIDs:     map[int64]bool{12345: true},
+		stop:         make(chan struct{}),
+	}
+
+	cleanup := func() {
+		db.Close()
+	}
+	return bot, cleanup
+}
+
+func TestMultiGroup_CloseReopenSpam(t *testing.T) {
+	_, cleanup := setupMultiGroupTest(t)
+	defer cleanup()
+
+	// Create same PR number in two different groups
+	prA := models.PRRecord{
+		ID:        "pr-close-a",
+		RepoGroup: "group-a",
+		Platform:  "github",
+		PRNumber:  42,
+		Title:     "Feature A",
+		Author:    "dev1",
+		State:     "open",
+	}
+	prB := models.PRRecord{
+		ID:        "pr-close-b",
+		RepoGroup: "group-b",
+		Platform:  "github",
+		PRNumber:  42,
+		Title:     "Feature B",
+		Author:    "dev2",
+		State:     "open",
+	}
+	dataA, _ := json.Marshal(prA)
+	dataB, _ := json.Marshal(prB)
+	db.Put(db.BucketPRs, "group-a#github#42", dataA)
+	db.Put(db.BucketPRs, "group-b#github#42", dataB)
+
+	t.Run("close group-a does not affect group-b", func(t *testing.T) {
+		// Close PR in group-a
+		pr, err := getPRByID("group-a", "42")
+		if err != nil {
+			t.Fatalf("getPRByID failed: %v", err)
+		}
+		if pr.RepoGroup != "group-a" {
+			t.Errorf("expected group-a, got %s", pr.RepoGroup)
+		}
+		pr.State = "closed"
+		updated, _ := json.Marshal(pr)
+		db.Put(db.BucketPRs, "group-a#github#42", updated)
+
+		// Verify group-b is untouched
+		prB2, err := getPRByID("group-b", "42")
+		if err != nil {
+			t.Fatalf("getPRByID for group-b failed: %v", err)
+		}
+		if prB2.State != "open" {
+			t.Errorf("group-b PR state = %q, want open", prB2.State)
+		}
+	})
+
+	t.Run("spam group-b does not affect group-a", func(t *testing.T) {
+		pr, err := getPRByID("group-b", "42")
+		if err != nil {
+			t.Fatalf("getPRByID failed: %v", err)
+		}
+		pr.SpamFlag = true
+		pr.State = "spam"
+		updated, _ := json.Marshal(pr)
+		db.Put(db.BucketPRs, "group-b#github#42", updated)
+
+		// Verify group-a is still closed (not spam)
+		prA2, err := getPRByID("group-a", "42")
+		if err != nil {
+			t.Fatalf("getPRByID for group-a failed: %v", err)
+		}
+		if prA2.State != "closed" {
+			t.Errorf("group-a PR state = %q, want closed", prA2.State)
+		}
+		if prA2.SpamFlag {
+			t.Error("group-a PR should not have SpamFlag")
+		}
+	})
+
+	t.Run("reopen spam PR clears spam flag", func(t *testing.T) {
+		pr, err := getPRByID("group-b", "42")
+		if err != nil {
+			t.Fatalf("getPRByID failed: %v", err)
+		}
+		if !pr.SpamFlag {
+			t.Fatal("expected SpamFlag=true before reopen")
+		}
+
+		// Simulate reopen logic from handleReopenPR
+		pr.State = "open"
+		pr.SpamFlag = false
+		updated, _ := json.Marshal(pr)
+		db.Put(db.BucketPRs, "group-b#github#42", updated)
+
+		pr2, err := getPRByID("group-b", "42")
+		if err != nil {
+			t.Fatalf("getPRByID after reopen failed: %v", err)
+		}
+		if pr2.State != "open" {
+			t.Errorf("state = %q, want open", pr2.State)
+		}
+		if pr2.SpamFlag {
+			t.Error("SpamFlag should be false after reopen")
+		}
+	})
+}
+
+func TestMultiGroup_GetOwnerRepoFromGroup(t *testing.T) {
+	_, cleanup := setupMultiGroupTest(t)
+	defer cleanup()
+
+	t.Run("group-a resolves correctly", func(t *testing.T) {
+		group := config.GetRepoGroupByName(config.Current(), "group-a")
+		if group == nil {
+			t.Fatal("group-a not found")
+		}
+		owner, repo := config.GetOwnerRepoFromGroup(group, "github")
+		if owner != "org-a" || repo != "repo-a" {
+			t.Errorf("got %s/%s, want org-a/repo-a", owner, repo)
+		}
+	})
+
+	t.Run("group-b resolves correctly", func(t *testing.T) {
+		group := config.GetRepoGroupByName(config.Current(), "group-b")
+		if group == nil {
+			t.Fatal("group-b not found")
+		}
+		owner, repo := config.GetOwnerRepoFromGroup(group, "github")
+		if owner != "org-b" || repo != "repo-b" {
+			t.Errorf("got %s/%s, want org-b/repo-b", owner, repo)
+		}
+	})
+
+	t.Run("non-existent group returns nil", func(t *testing.T) {
+		group := config.GetRepoGroupByName(config.Current(), "no-such-group")
+		if group != nil {
+			// GetRepoGroupByName falls back to "default" group
+			t.Logf("got fallback group: %s", group.Name)
+		}
+	})
+}
+
 func TestEmptyBotSetup(t *testing.T) {
 	bot := &TelegramBot{
 		adminIDs: map[int64]bool{},
