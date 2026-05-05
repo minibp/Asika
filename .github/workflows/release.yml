@@ -69,6 +69,14 @@ jobs:
                 -o "bin/$NAME" ./cmd/asika
             done
           done
+          for GOARCH in amd64; do
+            NAME="asika-windows-${GOARCH}.exe"
+            echo "Building $NAME..."
+            LDFLAGS="-s -w -X 'asika/common/version.Version=$TAG'"
+            GOOS=windows GOARCH=$GOARCH CGO_ENABLED=0 \
+              go build -ldflags="$LDFLAGS" \
+              -o "bin/$NAME" ./cmd/asika
+          done
 
       - name: Package tarballs and generate checksums
         run: |
