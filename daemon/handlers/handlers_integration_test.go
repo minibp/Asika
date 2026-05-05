@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -185,10 +186,10 @@ func TestPRHandlers_SingleMode(t *testing.T) {
 			State:     "open",
 		}
 		data, _ := json.Marshal(pr)
-		db.Put(db.BucketPRs, "single-repo#spam-pr", data)
+		db.Put(db.BucketPRs, "single-repo#42", data)
 
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/api/v1/repos/single-repo/prs/spam-pr/spam", nil)
+		req := httptest.NewRequest("POST", "/api/v1/repos/single-repo/prs/42/spam", nil)
 		engine.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
@@ -196,7 +197,7 @@ func TestPRHandlers_SingleMode(t *testing.T) {
 		}
 
 		// Verify PR marked as spam in DB
-		stored, _ := db.Get(db.BucketPRs, "single-repo#spam-pr")
+		stored, _ := db.Get(db.BucketPRs, "single-repo#42")
 		var updated models.PRRecord
 		json.Unmarshal(stored, &updated)
 		if !updated.SpamFlag {
@@ -208,20 +209,35 @@ func TestPRHandlers_SingleMode(t *testing.T) {
 	})
 
 	t.Run("approve on single mode fails when PR not found", func(t *testing.T) {
+		mock.Err = fmt.Errorf("PR not found")
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/api/v1/repos/single-repo/prs/nonexistent/approve", nil)
+		req := httptest.NewRequest("POST", "/api/v1/repos/single-repo/prs/9999/approve", nil)
 		engine.ServeHTTP(w, req)
+		mock.Err = nil
 
-		// Handler returns 500 if DB read fails, or 404 if key format doesn't exist
 		if w.Code != http.StatusNotFound && w.Code != http.StatusInternalServerError {
 			t.Errorf("expected 404/500 for approve PR not found, got %d", w.Code)
 		}
 	})
 
 	t.Run("reopen on single mode fails when PR not found", func(t *testing.T) {
+		mock.Err = fmt.Errorf("PR not found")
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/api/v1/repos/single-repo/prs/nonexistent/reopen", nil)
+		req := httptest.NewRequest("POST", "/api/v1/repos/single-repo/prs/9999/reopen", nil)
 		engine.ServeHTTP(w, req)
+		mock.Err = nil
+
+		if w.Code != http.StatusNotFound && w.Code != http.StatusInternalServerError {
+			t.Errorf("expected 404/500 for reopen PR not found, got %d", w.Code)
+		}
+	})
+
+	t.Run("reopen on single mode fails when PR not found", func(t *testing.T) {
+		mock.Err = fmt.Errorf("PR not found")
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/v1/repos/single-repo/prs/9999/reopen", nil)
+		engine.ServeHTTP(w, req)
+		mock.Err = nil
 
 		if w.Code != http.StatusNotFound && w.Code != http.StatusInternalServerError {
 			t.Errorf("expected 404/500 for reopen, got %d", w.Code)
