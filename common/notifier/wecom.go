@@ -54,7 +54,7 @@ type WeComNotifier struct {
 }
 
 // NewWeComNotifier creates a WeCom notifier from config.
-func NewWeComNotifier(config map[string]interface{}) *WeComNotifier {
+func NewWeComNotifier(config map[string]interface{}) Notifier {
 	n := &WeComNotifier{
 		httpClient: &http.Client{Timeout: wecomRequestTimeout},
 		msgType:    "markdown",

@@ -284,6 +284,16 @@ agent_id = 1000001
 to_user = ["zhangsan", "lisi"]
 msg_type = "textcard"
 
+# DingTalk
+[[notify]]
+type   = "dingtalk"
+[notify.config]
+webhook_url = "https://oapi.dingtalk.com/robot/send?access_token=xxx"
+secret = "SECxxx"  # optional, for HMAC-SHA256 signature
+at_mobiles = ["13800001111"]  # optional, @specific users by mobile
+at_all = false  # optional, @everyone
+msg_type = "markdown"  # "text" (default), "markdown", "link", "actionCard", "feedCard"
+
 # GitHub @mentions
 [[notify]]
 type   = "github_at"

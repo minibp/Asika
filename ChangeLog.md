@@ -17,6 +17,13 @@
   - Add URL redaction in logs (webhook key shown as `***`)
   - Add `signWebhookHMAC` utility for HMAC-SHA256 webhook signing
   - Validate config at construction time (app mode missing params falls back to webhook-only)
+- **Add DingTalk (钉钉) notifier:**
+  - Custom webhook bot support with JSON payload
+  - HMAC-SHA256 signature via `secret` config
+  - @mention support: `at_mobiles` (phone numbers) and `at_all`
+  - Five message formats: `text` (default), `markdown`, `link`, `actionCard`, `feedCard`
+  - Exponential backoff retry (up to 3 attempts)
+  - DingTalk API `errcode`/`errmsg` response parsing
 - Add audit log entries for all bot actions (Telegram/Discord/Feishu approve/close/reopen/spam)
 - Fix Discord/Feishu bot close/reopen not updating PR state in local DB
 - Fix Discord/Feishu bot reopen not clearing spam flag unconditionally

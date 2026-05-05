@@ -333,6 +333,8 @@ func (m *Manager) sendNotification(group, title, body string) {
 			n = notifier.NewTelegramNotifier(nc.Config)
 		case "feishu":
 			n = notifier.NewFeishuNotifier(nc.Config)
+		case "dingtalk":
+			n = notifier.NewDingTalkNotifier(nc.Config)
 		}
 		if n == nil {
 			continue

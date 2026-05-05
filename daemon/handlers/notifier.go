@@ -50,21 +50,41 @@ func sendNotifications(title, body string) {
 func createNotifierFromNotifyConfig(nc models.NotifyConfig) notifier.Notifier {
 	switch nc.Type {
 	case "smtp":
-		return notifier.NewSMTPNotifier(nc.Config)
+		if n := notifier.NewSMTPNotifier(nc.Config); n != nil {
+			return n
+		}
 	case "wecom":
-		return notifier.NewWeComNotifier(nc.Config)
+		if n := notifier.NewWeComNotifier(nc.Config); n != nil {
+			return n
+		}
 	case "github_at":
-		return notifier.NewGitHubAtNotifier(nc.Config)
+		if n := notifier.NewGitHubAtNotifier(nc.Config); n != nil {
+			return n
+		}
 	case "gitlab_at":
-		return notifier.NewGitLabAtNotifier(nc.Config)
+		if n := notifier.NewGitLabAtNotifier(nc.Config); n != nil {
+			return n
+		}
 	case "gitea_at":
-		return notifier.NewGiteaAtNotifier(nc.Config)
+		if n := notifier.NewGiteaAtNotifier(nc.Config); n != nil {
+			return n
+		}
 	case "telegram":
-		return notifier.NewTelegramNotifier(nc.Config)
+		if n := notifier.NewTelegramNotifier(nc.Config); n != nil {
+			return n
+		}
 	case "feishu":
-		return notifier.NewFeishuNotifier(nc.Config)
+		if n := notifier.NewFeishuNotifier(nc.Config); n != nil {
+			return n
+		}
 	case "discord":
-		return notifier.NewDiscordNotifier(nc.Config)
+		if n := notifier.NewDiscordNotifier(nc.Config); n != nil {
+			return n
+		}
+	case "dingtalk":
+		if n := notifier.NewDingTalkNotifier(nc.Config); n != nil {
+			return n
+		}
 	}
 	return nil
 }

@@ -174,7 +174,12 @@ func (d *SpamDetector) sendSpamNotification(pr *models.PRRecord) {
 			n = notifier.NewGitLabAtNotifier(nc.Config)
 		case "gitea_at":
 			n = notifier.NewGiteaAtNotifier(nc.Config)
+		case "dingtalk":
+			n = notifier.NewDingTalkNotifier(nc.Config)
 		default:
+			continue
+		}
+		if n == nil {
 			continue
 		}
 

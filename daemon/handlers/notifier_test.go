@@ -114,9 +114,10 @@ func TestCreateNotifierFromNotifyConfig(t *testing.T) {
 		{"github_at", "github_at", false, "github_at"},
 		{"gitlab_at", "gitlab_at", false, "gitlab_at"},
 		{"gitea_at", "gitea_at", false, "gitea_at"},
-		{"telegram", "telegram", false, "telegram"},
+		{"telegram", "telegram", true, ""},
 		{"feishu", "feishu", false, "feishu"},
-		{"discord", "discord", false, "discord"},
+		{"discord", "discord", true, ""},
+		{"dingtalk", "dingtalk", true, ""},
 		{"unknown", "unknown_type", true, ""},
 	}
 
