@@ -354,6 +354,13 @@ func (b *TelegramBot) handleApprovePR(c telebot.Context) error {
 	ctx := context.Background()
 	if err := client.ApprovePR(ctx, owner, repo, pr.PRNumber); err != nil {
 		slog.Error("telegram bot: approve failed", "error", err)
+		db.AppendAuditLog("error", "PR approve failed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "telegram",
+			"error":      err.Error(),
+		})
 		return c.Send(fmt.Sprintf("Failed to approve PR: %v", err))
 	}
 
@@ -361,6 +368,14 @@ func (b *TelegramBot) handleApprovePR(c telebot.Context) error {
 	prData, _ := json.Marshal(pr)
 	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("info", "PR approved", map[string]interface{}{
+		"pr_number":     pr.PRNumber,
+		"repo_group":    pr.RepoGroup,
+		"platform":      pr.Platform,
+		"actor":         "telegram",
+		"added_to_queue": true,
+	})
 
 	if b.queueMgr != nil {
 		if err := b.queueMgr.AddToQueue(pr); err != nil {
@@ -406,8 +421,27 @@ func (b *TelegramBot) handleClosePR(c telebot.Context) error {
 
 	ctx := context.Background()
 	if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+		db.AppendAuditLog("error", "PR close failed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "telegram",
+			"error":      err.Error(),
+		})
 		return c.Send(fmt.Sprintf("Failed to close PR: %v", err))
 	}
+
+	pr.State = "closed"
+	prData, _ := json.Marshal(pr)
+	key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
+	db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("info", "PR closed", map[string]interface{}{
+		"pr_number":  pr.PRNumber,
+		"repo_group": pr.RepoGroup,
+		"platform":   pr.Platform,
+		"actor":      "telegram",
+	})
 
 	return c.Send(fmt.Sprintf("PR #%d closed.", pr.PRNumber))
 }
@@ -445,17 +479,28 @@ func (b *TelegramBot) handleReopenPR(c telebot.Context) error {
 
 	ctx := context.Background()
 	if err := client.ReopenPR(ctx, owner, repo, pr.PRNumber); err != nil {
+		db.AppendAuditLog("error", "PR reopen failed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "telegram",
+			"error":      err.Error(),
+		})
 		return c.Send(fmt.Sprintf("Failed to reopen PR: %v", err))
 	}
 
-	// If this was a spam recovery, clear spam flag
-	if pr.SpamFlag {
-		pr.State = "open"
-		pr.SpamFlag = false
-		pr.UpdatedAt = time.Now()
-		data, _ := json.Marshal(pr)
-		db.PutPRWithIndex(fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data, pr.ID, pr.RepoGroup, pr.PRNumber)
-	}
+	pr.State = "open"
+	pr.SpamFlag = false
+	pr.UpdatedAt = time.Now()
+	data, _ := json.Marshal(pr)
+	db.PutPRWithIndex(fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber), data, pr.ID, pr.RepoGroup, pr.PRNumber)
+
+	db.AppendAuditLog("info", "PR reopened", map[string]interface{}{
+		"pr_number":  pr.PRNumber,
+		"repo_group": pr.RepoGroup,
+		"platform":   pr.Platform,
+		"actor":      "telegram",
+	})
 
 	return c.Send(fmt.Sprintf("PR #%d reopened.", pr.PRNumber))
 }
@@ -488,13 +533,28 @@ func (b *TelegramBot) handleMarkSpam(c telebot.Context) error {
 	data, _ := json.Marshal(pr)
 	db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
 
+	db.AppendAuditLog("warn", "PR marked as spam", map[string]interface{}{
+		"pr_number":  pr.PRNumber,
+		"repo_group": pr.RepoGroup,
+		"platform":   pr.Platform,
+		"actor":      "telegram",
+	})
+
 	// Close the PR on the platform
 	group := config.GetRepoGroupByName(b.cfg, repoGroup)
 	if group != nil {
 		client := b.getClientForPlatform(pr.Platform)
 		if client != nil {
 			owner, repo := config.GetOwnerRepoFromGroup(group, pr.Platform)
-			client.ClosePR(context.Background(), owner, repo, pr.PRNumber)
+			if err := client.ClosePR(context.Background(), owner, repo, pr.PRNumber); err != nil {
+				db.AppendAuditLog("error", "PR spam close failed", map[string]interface{}{
+					"pr_number":  pr.PRNumber,
+					"repo_group": pr.RepoGroup,
+					"platform":   pr.Platform,
+					"actor":      "telegram",
+					"error":      err.Error(),
+				})
+			}
 		}
 	}
 
@@ -685,6 +745,14 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 		db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
 
+		db.AppendAuditLog("info", "PR approved", map[string]interface{}{
+			"pr_number":     pr.PRNumber,
+			"repo_group":    pr.RepoGroup,
+			"platform":      pr.Platform,
+			"actor":         "telegram",
+			"added_to_queue": true,
+		})
+
 		if b.queueMgr != nil {
 			if err := b.queueMgr.AddToQueue(pr); err != nil {
 				slog.Warn("telegram bot: failed to add PR to queue", "error", err, "pr_number", pr.PRNumber)
@@ -700,6 +768,13 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("PR is already %s.", pr.State)})
 		}
 		if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+			db.AppendAuditLog("error", "PR close failed", map[string]interface{}{
+				"pr_number":  pr.PRNumber,
+				"repo_group": pr.RepoGroup,
+				"platform":   pr.Platform,
+				"actor":      "telegram",
+				"error":      err.Error(),
+			})
 			msg := fmt.Sprintf("Failed: %v", err)
 			if len(msg) > 200 {
 				msg = msg[:197] + "..."
@@ -710,6 +785,12 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 		prData, _ := json.Marshal(pr)
 		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 		db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+		db.AppendAuditLog("info", "PR closed", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "telegram",
+		})
 		c.Respond(&telebot.CallbackResponse{Text: "Closed ❌"})
 
 	case "reopen":
@@ -720,22 +801,31 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "PR is already open."})
 		}
 		if err := client.ReopenPR(ctx, owner, repo, pr.PRNumber); err != nil {
+			db.AppendAuditLog("error", "PR reopen failed", map[string]interface{}{
+				"pr_number":  pr.PRNumber,
+				"repo_group": pr.RepoGroup,
+				"platform":   pr.Platform,
+				"actor":      "telegram",
+				"error":      err.Error(),
+			})
 			msg := fmt.Sprintf("Failed: %v", err)
 			if len(msg) > 200 {
 				msg = msg[:197] + "..."
 			}
 			return c.Respond(&telebot.CallbackResponse{Text: msg})
 		}
-		if pr.SpamFlag {
-			pr.State = "open"
-			pr.SpamFlag = false
-		} else {
-			pr.State = "open"
-		}
+		pr.State = "open"
+		pr.SpamFlag = false
 		pr.UpdatedAt = time.Now()
 		data, _ := json.Marshal(pr)
 		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 		db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
+		db.AppendAuditLog("info", "PR reopened", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "telegram",
+		})
 		c.Respond(&telebot.CallbackResponse{Text: "Reopened 🔄"})
 
 	case "spam":
@@ -748,7 +838,20 @@ func (b *TelegramBot) handleCallback(c telebot.Context) error {
 		data, _ := json.Marshal(pr)
 		key := fmt.Sprintf("%s#%s#%d", pr.RepoGroup, pr.Platform, pr.PRNumber)
 		db.PutPRWithIndex(key, data, pr.ID, pr.RepoGroup, pr.PRNumber)
+		db.AppendAuditLog("warn", "PR marked as spam", map[string]interface{}{
+			"pr_number":  pr.PRNumber,
+			"repo_group": pr.RepoGroup,
+			"platform":   pr.Platform,
+			"actor":      "telegram",
+		})
 		if err := client.ClosePR(ctx, owner, repo, pr.PRNumber); err != nil {
+			db.AppendAuditLog("error", "PR spam close failed", map[string]interface{}{
+				"pr_number":  pr.PRNumber,
+				"repo_group": pr.RepoGroup,
+				"platform":   pr.Platform,
+				"actor":      "telegram",
+				"error":      err.Error(),
+			})
 			msg := fmt.Sprintf("Marked spam but close failed: %v", err)
 			if len(msg) > 200 {
 				msg = msg[:197] + "..."
