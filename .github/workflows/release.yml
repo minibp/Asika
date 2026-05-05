@@ -23,28 +23,52 @@ jobs:
         with:
           go-version: '1.25.0'
 
-      - name: Checkout pack
-        uses: actions/checkout@v4
-        with:
-          repository: AsikaProject/pack
-          path: pack
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build binaries
-        run: bash pack/scripts/build-binaries.sh
-        env:
-          GO_VERSION: '1.25.0'
-          TAG_NAME: ${{ github.ref_name }}
-
       - name: Get version
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build binaries
+        run: |
+          mkdir -p bin
+          TAG=${GITHUB_REF#refs/tags/v}
+          for GOOS in linux darwin windows; do
+            for GOARCH in amd64 arm64; do
+              if [ "$GOOS" = "windows" ] && [ "$GOARCH" = "arm64" ]; then
+                continue
+              fi
+              EXT=""
+              [ "$GOOS" = "windows" ] && EXT=".exe"
+              NAME="asikad-${GOOS}-${GOARCH}${EXT}"
+              echo "Building $name..."
+              GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 \
+                go build -ldflags="-s -w -X 'asika/common/version.Version=$TAG'" \
+                -o "bin/$NAME" ./cmd/asikad
+            done
+          done
+          for GOOS in linux darwin; do
+            for GOARCH in amd64 arm64; do
+              NAME="asika-${GOOS}-${GOARCH}"
+              echo "Building $name..."
+              GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 \
+                go build -ldflags="-s -w -X 'asika/common/version.Version=$TAG'" \
+                -o "bin/$NAME" ./cmd/asika
+            done
+          done
+
+      - name: Generate checksums
+        run: |
+          cd bin
+          sha256sum asikad-* asika-* > checksums.txt
+          cat checksums.txt
+          cd ..
 
       - uses: actions/upload-artifact@v6
         with:
           name: binaries
           path: |
-            bin/*.tar.gz
+            bin/asikad-*
+            bin/asika-*
+            bin/checksums.txt
 
   package-deb:
     needs: build
@@ -71,13 +95,8 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract binaries
+      - name: Copy binaries
         run: |
-          cd bin
-          for f in *.tar.gz; do
-            tar -xzf $f
-          done
-          cd ..
           cp bin/asika-linux-${{ matrix.goarch }} asika || true
           cp bin/asikad-linux-${{ matrix.goarch }} asikad || true
 
@@ -116,13 +135,8 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract binaries
+      - name: Copy binaries
         run: |
-          cd bin
-          for f in *.tar.gz; do
-            tar -xzf $f
-          done
-          cd ..
           cp bin/asikad-darwin-${{ matrix.goarch }} asikad || true
 
       - name: Package PKG
@@ -153,14 +167,9 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract binaries
+      - name: Copy binaries
         shell: bash
         run: |
-          cd bin
-          for f in *.tar.gz; do
-            tar -xzf $f
-          done
-          cd ..
           cp bin/asika-windows-amd64.exe asika.exe || true
           cp bin/asikad-windows-amd64.exe asikad.exe || true
 
@@ -199,13 +208,8 @@ jobs:
           path: pack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract binaries
+      - name: Copy binaries
         run: |
-          cd bin
-          for f in *.tar.gz; do
-            tar -xzf $f
-          done
-          cd ..
           cp bin/asika-linux-amd64 asika || true
           cp bin/asikad-linux-amd64 asikad || true
 
@@ -225,7 +229,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          cp binaries/* release-assets/ 2>/dev/null || true
+          cp binaries/asikad-* binaries/asika-* binaries/checksums.txt release-assets/ 2>/dev/null || true
           cp deb-packages/* release-assets/ 2>/dev/null || true
           cp pkg-packages/* release-assets/ 2>/dev/null || true
           cp inno-packages/* release-assets/ 2>/dev/null || true
