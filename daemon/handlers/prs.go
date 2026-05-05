@@ -904,6 +904,49 @@ func GetLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, logs)
 }
 
+// ExportLogs handles GET /api/v1/logs/export (8.2)
+// Returns audit logs as a downloadable JSON file
+func ExportLogs(c *gin.Context) {
+	format := c.Query("format")
+	if format == "" {
+		format = "json"
+	}
+	level := c.Query("level")
+
+	logs := make([]models.AuditLog, 0)
+	err := db.ForEach(db.BucketLogs, func(key, value []byte) error {
+		var log models.AuditLog
+		if err := json.Unmarshal(value, &log); err != nil {
+			return nil
+		}
+		if level != "" && log.Level != level {
+			return nil
+		}
+		logs = append(logs, log)
+		return nil
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read logs"})
+		return
+	}
+
+	switch format {
+	case "json":
+		c.Header("Content-Type", "application/json")
+		c.Header("Content-Disposition", "attachment; filename=asika-audit-logs.json")
+		c.JSON(http.StatusOK, logs)
+	case "csv":
+		c.Header("Content-Type", "text/csv")
+		c.Header("Content-Disposition", "attachment; filename=asika-audit-logs.csv")
+		c.String(http.StatusOK, "timestamp,level,message\n")
+		for _, l := range logs {
+			c.String(http.StatusOK, "%s,%s,%s\n", l.Timestamp.Format(time.RFC3339), l.Level, l.Message)
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported format: " + format})
+	}
+}
+
 // getClientForGroup returns the platform client for a repo group
 func getClientForGroup(group *models.RepoGroup, platform string) platforms.PlatformClient {
 	if platform == "" {

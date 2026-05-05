@@ -260,3 +260,46 @@ func TestForEach_InvalidBucket(t *testing.T) {
 		t.Error("ForEach on invalid bucket should return error")
 	}
 }
+
+func TestPing_Success(t *testing.T) {
+	initTestDB(t)
+
+	err := Ping()
+	if err != nil {
+		t.Errorf("Ping() = %v, want nil", err)
+	}
+}
+
+func TestPing_NotInitialized(t *testing.T) {
+	// Save and restore DB
+	origDB := DB
+	defer func() { DB = origDB }()
+
+	DB = nil
+
+	err := Ping()
+	if err == nil {
+		t.Error("Ping() should return error when DB is nil")
+	}
+}
+
+func TestPing_AfterClose(t *testing.T) {
+	dir := t.TempDir()
+	err := Init(dir + "/ping_test.db")
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// Ping should work before close
+	if err := Ping(); err != nil {
+		t.Errorf("Ping() before close = %v, want nil", err)
+	}
+
+	// Close and verify Ping fails
+	Close()
+
+	err = Ping()
+	if err == nil {
+		t.Error("Ping() should return error after Close()")
+	}
+}

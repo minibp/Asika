@@ -129,7 +129,7 @@ func gitLabMRToRecord(mr *gitlab.MergeRequest) *models.PRRecord {
  		UpdatedAt:      updatedAt,
  		Events:         []models.PREvent{},
  		IsDraft:        mr.WorkInProgress,
- 		HasConflict:    false, // TODO: implement merge status check for GitLab
+ 		HasConflict:    gitLabHasConflict(mr),
  		HTMLURL:        mr.WebURL,
  		MergedAt:       mergedAt,
  	}
@@ -169,6 +169,10 @@ func gitLabBasicMRToRecord(mr *gitlab.BasicMergeRequest) *models.PRRecord {
 		Events:         []models.PREvent{},
 		HTMLURL:        mr.WebURL,
 	}
+}
+
+func gitLabHasConflict(mr *gitlab.MergeRequest) bool {
+	return mr.HasConflicts
 }
 
 func gitLabState(state string) string {

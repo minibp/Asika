@@ -128,9 +128,18 @@ type NotifyConfig struct {
 
 // ServerConfig represents server configuration
 type ServerConfig struct {
-    Listen          string `toml:"listen"`
-    Mode            string `toml:"mode"`
-    EnableWebUpdate bool   `toml:"enable_web_update"`
+	Listen              string   `toml:"listen"`
+	Mode                string   `toml:"mode"`
+	EnableWebUpdate     bool     `toml:"enable_web_update"`
+	EnablePprof         bool     `toml:"enable_pprof"`
+	CORSOrigins         []string `toml:"cors_origins"`
+	RateLimitEnabled    bool     `toml:"rate_limit_enabled"`
+	RateLimitRPS        int      `toml:"rate_limit_rps"`
+	RateLimitBurst      int      `toml:"rate_limit_burst"`
+	ReadTimeoutSeconds  int      `toml:"read_timeout_seconds"`
+	WriteTimeoutSeconds int      `toml:"write_timeout_seconds"`
+	ShutdownTimeoutSeconds int   `toml:"shutdown_timeout_seconds"`
+	MetricsLogInterval  string   `toml:"metrics_log_interval"`
 }
 
 // UpdatesConfig represents self-update configuration

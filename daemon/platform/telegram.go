@@ -129,19 +129,17 @@ func (b *TelegramBot) requireAdmin(c telebot.Context) bool {
 
 // handleStart handles /start command.
 func (b *TelegramBot) handleStart(c telebot.Context) error {
+	if !b.requireAdmin(c) {
+		return nil
+	}
+
 	userID := c.Sender().ID
 	username := c.Sender().Username
 
 	msg := fmt.Sprintf(
-		"<b>Welcome to Asika Bot</b>\n\nHello @%s (ID: %d)\n\nUse /help to see available commands.\n",
+		"<b>Welcome to Asika Bot</b>\n\nHello @%s (ID: %d)\n\nUse /help to see available commands.\n\nYou have admin privileges.",
 		html.EscapeString(username), userID,
 	)
-
-	if b.isAdmin(c) {
-		msg += "You have admin privileges."
-	} else {
-		msg += "Access is currently unrestricted. Configure admin_ids in bot config to restrict access."
-	}
 
 	return c.Send(msg, &telebot.SendOptions{ParseMode: telebot.ModeHTML})
 }

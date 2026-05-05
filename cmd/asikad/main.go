@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -20,9 +21,16 @@ import (
 	"asika/daemon/server/core"
 )
 
+const (
+	defaultShutdownTimeout = 30 * time.Second
+	metricsLogInterval    = 5 * time.Minute
+)
+
 func main() {
 	desktopMode := flag.Bool("desktop", false, "Run in desktop foreground mode (open browser to WebUI)")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
+	shutdownTimeout := flag.Duration("shutdown-timeout", defaultShutdownTimeout, "Graceful shutdown timeout")
+	metricsInterval := flag.Duration("metrics-interval", metricsLogInterval, "Metrics logging interval (0 to disable)")
 	flag.Parse()
 
 	if *versionFlag {
@@ -40,7 +48,7 @@ func main() {
 	if err != nil {
 		slog.Warn("config not found, starting in initialization mode", "error", err)
 		srv := server.NewServer(nil, nil)
-		slog.Info("asikad starting in initialization mode")
+		slog.Info("asikad starting in initialization mode", "version", version.Version)
 
 		if *desktopMode {
 			go func() {
@@ -65,8 +73,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("Asika daemon starting")
-	slog.Info("Copyright (R) 2026 The minibp developers. All rights reserved")
+	slog.Info("Asika daemon starting", "version", version.Version)
+	slog.Info("Copyright (R) 2026 The Asika Project. All rights reserved.")
+
+	if *metricsInterval > 0 {
+		server.LogMetrics(*metricsInterval)
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -86,52 +98,66 @@ func main() {
 		}()
 	}
 
+	serverErrors := make(chan error, 1)
 	go func() {
-		if err := ic.Server.Start(); err != nil {
-			if err == http.ErrServerClosed {
-				slog.Info("http server closed")
-			} else {
-				slog.Error("server failed", "error", err)
-				os.Exit(1)
-			}
-		}
+		serverErrors <- ic.Server.Start()
 	}()
 
 	sig := <-sigChan
-	slog.Info("received signal, shutting down", "signal", sig)
+	slog.Info("received signal, shutting down", "signal", sig, "timeout", *shutdownTimeout)
 
-	if ic.QueueMgr != nil {
-		ic.QueueMgr.Stop()
-	}
-	if ic.SpamDetector != nil {
-		ic.SpamDetector.Stop()
-	}
-	if ic.EventConsumer != nil {
-		ic.EventConsumer.Stop()
-	}
-	if ic.Poller != nil {
-		ic.Poller.Stop()
+	server.SetHealth(false)
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), *shutdownTimeout)
+	defer shutdownCancel()
+
+	go func() {
+		if ic.QueueMgr != nil {
+			ic.QueueMgr.Stop()
+		}
+		if ic.SpamDetector != nil {
+			ic.SpamDetector.Stop()
+		}
+		if ic.EventConsumer != nil {
+			ic.EventConsumer.Stop()
+		}
+		if ic.Poller != nil {
+			ic.Poller.Stop()
+		}
+
+		if ic.TgBot != nil {
+			ic.TgBot.Stop()
+		}
+		if ic.FsBot != nil {
+			ic.FsBot.Stop()
+		}
+		if ic.DiscordBot != nil {
+			ic.DiscordBot.Stop()
+		}
+
+		if err := ic.Server.Stop(); err != nil {
+			slog.Error("server stop error", "error", err)
+		}
+
+		slog.Info("closing database")
+		db.Close()
+		slog.Info("database closed")
+
+		slog.Info("shutdown complete")
+		shutdownCancel()
+	}()
+
+	select {
+	case <-shutdownCtx.Done():
+		if shutdownCtx.Err() == context.DeadlineExceeded {
+			slog.Warn("shutdown timed out, forcing exit")
+		}
+	case err := <-serverErrors:
+		if err != nil && err != http.ErrServerClosed {
+			slog.Error("server error during shutdown", "error", err)
+		}
 	}
 
-	if ic.TgBot != nil {
-		ic.TgBot.Stop()
-	}
-	if ic.FsBot != nil {
-		ic.FsBot.Stop()
-	}
-	if ic.DiscordBot != nil {
-		ic.DiscordBot.Stop()
-	}
-
-	if err := ic.Server.Stop(); err != nil {
-		slog.Error("server stop error", "error", err)
-	}
-
-	slog.Info("closing database")
-	db.Close()
-	slog.Info("database closed")
-
-	slog.Info("shutdown complete")
 	os.Exit(0)
 }
 

@@ -1,6 +1,22 @@
 # ChangeLog for Asika
 
-## v20260505DEV
+## Unreleased
+- Fix GitLab HasConflict: use mr.HasConflicts field instead of hardcoded false
+- Fix webhook permanent failure: notify all configured channels when retries exhausted
+- Fix PlatformNotifier client injection: wire via WirePlatformNotifiers() + InitNotifiers() at bootstrap
+- Fix database migrations: implement versioned migration system, replacing no-op stub
+- Fix config hot reload: reload from disk instead of re-storing stale object
+- Fix Telegram bot /start: reject non-admins directly instead of showing welcome with contradictory hint
+- Add Prometheus /metrics endpoint (requests, latency, goroutines, memory, GC)
+- Add enhanced /health check (DB connectivity, uptime, memory, goroutines)
+- Add pprof debug endpoints (configurable toggle)
+- Add API rate limiting (per-IP token bucket, configurable RPS/burst)
+- Add CORS configuration support
+- Add audit log export API: GET /api/v1/logs/export?format=json|csv
+- Add graceful shutdown timeout (--shutdown-timeout flag)
+- Add label rule title:/author: scope prefixes
+- Add unified notifier registration with callback pattern
+- Add tests: 7 new test files, ~48 test cases (metrics, ratelimit, cors, migrations, notifier, labeler, ping)
 - Refactor cmd/asikad/main.go: move all init logic to daemon/server/core subpackage
 - Fix graceful shutdown: stop workers/bots before HTTP server, close DB last, exit 0 on signal
 - Add database init/close info logs, change PR fetch log to summary format (total/success/failed)

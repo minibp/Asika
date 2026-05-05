@@ -232,3 +232,178 @@ func TestHandlePROpenedNoRules(t *testing.T) {
 		t.Errorf("expected no labels when no rules, got %v", mock.AppliedLabels)
 	}
 }
+
+func TestMatchRule_TitleScope(t *testing.T) {
+	compiledPatterns = make(map[string]*regexp.Regexp)
+
+	tests := []struct {
+		name    string
+		pattern string
+		files   []string
+		title   string
+		author  string
+		want    bool
+	}{
+		{
+			name:    "title regex matches",
+			pattern: "title:api",
+			files:   []string{"README.md"},
+			title:   "Add new api endpoint",
+			author:  "dev1",
+			want:    true,
+		},
+		{
+			name:    "title regex no match",
+			pattern: "title:api",
+			files:   []string{"src/api.go"},
+			title:   "Fix bug in parser",
+			author:  "dev1",
+			want:    false,
+		},
+		{
+			name:    "title glob matches",
+			pattern: "title:*api*",
+			files:   []string{"README.md"},
+			title:   "Add new api endpoint",
+			author:  "dev1",
+			want:    true,
+		},
+		{
+			name:    "author regex matches",
+			pattern: "author:dependabot",
+			files:   []string{"README.md"},
+			title:   "Bump version",
+			author:  "dependabot[bot]",
+			want:    true,
+		},
+		{
+			name:    "author regex no match",
+			pattern: "author:dependabot",
+			files:   []string{"README.md"},
+			title:   "Bump version",
+			author:  "human-dev",
+			want:    false,
+		},
+		{
+			name:    "file scope still works",
+			pattern: "file:*.go",
+			files:   []string{"main.go"},
+			title:   "some title",
+			author:  "dev1",
+			want:    true,
+		},
+		{
+			name:    "default scope (no prefix) matches files",
+			pattern: "*.go",
+			files:   []string{"main.go"},
+			title:   "some title",
+			author:  "dev1",
+			want:    true,
+		},
+		{
+			name:    "title with colon in pattern",
+			pattern: "title:^fix:",
+			files:   []string{},
+			title:   "fix: resolve bug",
+			author:  "dev1",
+			want:    true,
+		},
+		{
+			name:    "author exact match",
+			pattern: "author:admin",
+			files:   []string{},
+			title:   "anything",
+			author:  "admin",
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchRule(tt.pattern, tt.files, tt.title, tt.author)
+			if got != tt.want {
+				t.Errorf("matchRule(%q, %v, %q, %q) = %v, want %v",
+					tt.pattern, tt.files, tt.title, tt.author, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyRules_TitleScope(t *testing.T) {
+	l, mock := setupLabelerTest(t)
+	defer func() { db.Close() }()
+
+	compiledPatterns = make(map[string]*regexp.Regexp)
+
+	cfg := &models.Config{
+		LabelRules: []models.LabelRule{
+			{Pattern: "title:api", Label: "api-change"},
+			{Pattern: "author:dependabot", Label: "automated"},
+		},
+		RepoGroups: []models.RepoGroupConfig{
+			{Name: "test-group", Mode: "single", MirrorPlatform: "github", GitHub: "owner/repo"},
+		},
+	}
+	config.Store(cfg)
+
+	pr := &models.PRRecord{
+		ID:        "pr-title-1",
+		RepoGroup: "test-group",
+		Platform:  "github",
+		PRNumber:  10,
+		Title:     "Add new REST api endpoint",
+		Author:    "dependabot[bot]",
+		State:     "open",
+	}
+
+	mock.DiffFiles = []string{"README.md"}
+	l.ApplyRules(pr, "test-group", mock.DiffFiles)
+
+	sort.Strings(mock.AppliedLabels)
+	expected := []string{"api-change", "automated"}
+
+	if len(mock.AppliedLabels) != len(expected) {
+		t.Errorf("AppliedLabels = %v, want %v", mock.AppliedLabels, expected)
+		return
+	}
+
+	for i := range expected {
+		if mock.AppliedLabels[i] != expected[i] {
+			t.Errorf("AppliedLabels[%d] = %q, want %q", i, mock.AppliedLabels[i], expected[i])
+		}
+	}
+}
+
+func TestApplyRules_TitleNoMatch(t *testing.T) {
+	l, mock := setupLabelerTest(t)
+	defer func() { db.Close() }()
+
+	compiledPatterns = make(map[string]*regexp.Regexp)
+
+	cfg := &models.Config{
+		LabelRules: []models.LabelRule{
+			{Pattern: "title:security", Label: "security-fix"},
+		},
+		RepoGroups: []models.RepoGroupConfig{
+			{Name: "test-group", Mode: "single", MirrorPlatform: "github", GitHub: "owner/repo"},
+		},
+	}
+	config.Store(cfg)
+
+	pr := &models.PRRecord{
+		ID:        "pr-title-2",
+		RepoGroup: "test-group",
+		Platform:  "github",
+		PRNumber:  11,
+		Title:     "Update README",
+		Author:    "dev1",
+		State:     "open",
+	}
+
+	mock.DiffFiles = []string{"README.md"}
+	l.ApplyRules(pr, "test-group", mock.DiffFiles)
+
+	if len(mock.AppliedLabels) != 0 {
+		t.Errorf("expected no labels for non-matching title, got %v", mock.AppliedLabels)
+	}
+}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -454,7 +455,7 @@ func StartWebhookRetryWorker() {
 					if retry.FailCount >= 10 {
 						slog.Error("webhook retry max attempts reached, giving up", "id", retry.ID)
 						db.DeleteWebhookRetry(retry.ID)
-						// TODO: notify admins of permanent failure
+						notifyWebhookPermanentFailure(retry)
 						continue
 					}
 
@@ -468,5 +469,12 @@ func StartWebhookRetryWorker() {
 			}
 		}
 	}()
-	slog.Info("webhook retry worker started")
+ 	slog.Info("webhook retry worker started")
+}
+
+func notifyWebhookPermanentFailure(retry *models.WebhookRetry) {
+	title := "⚠️ Webhook Permanent Failure"
+	body := fmt.Sprintf("Webhook processing has permanently failed after %d retries.\n\nRepo Group: %s\nPlatform: %s\nWebhook ID: %s\nLast Error: %s\nFailed At: %s",
+		retry.FailCount, retry.RepoGroup, retry.Platform, retry.ID, retry.LastError, retry.LastFailed.Format(time.RFC3339))
+	sendNotifications(title, body)
 }

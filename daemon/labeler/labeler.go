@@ -35,7 +35,6 @@ func (l *Labeler) HandlePROpened(pr *models.PRRecord, repoGroup string) {
 		return
 	}
 
-	// Get changed files from platform
 	client, ok := l.clients[platforms.PlatformType(pr.Platform)]
 	if !ok {
 		slog.Error("no client for platform", "platform", pr.Platform)
@@ -60,11 +59,10 @@ func (l *Labeler) HandlePROpened(pr *models.PRRecord, repoGroup string) {
 		return
 	}
 
-	// Apply rules with the actual files
 	l.ApplyRules(pr, repoGroup, files)
 }
 
-// ApplyRules applies label rules to a PR based on its changed files
+// ApplyRules applies label rules to a PR based on its changed files, title, and description
 func (l *Labeler) ApplyRules(pr *models.PRRecord, repoGroup string, files []string) {
 	cfg := config.Current()
 	if cfg == nil {
@@ -90,7 +88,7 @@ func (l *Labeler) ApplyRules(pr *models.PRRecord, repoGroup string, files []stri
 
 	ctx := context.Background()
 	for _, rule := range rules {
-		if matchPattern(rule.Pattern, files) {
+		if matchRule(rule.Pattern, files, pr.Title, pr.Author) {
 			slog.Info("adding label", "label", rule.Label, "pr", pr.PRNumber, "pattern", rule.Pattern)
 			color := rule.Color
 			if color == "" {
@@ -101,6 +99,36 @@ func (l *Labeler) ApplyRules(pr *models.PRRecord, repoGroup string, files []stri
 			}
 		}
 	}
+}
+
+func matchRule(pattern string, files []string, title, author string) bool {
+	scope := "file"
+	pat := pattern
+
+	if idx := strings.Index(pattern, ":"); idx > 0 && idx < 10 {
+		prefix := strings.ToLower(pattern[:idx])
+		if prefix == "title" || prefix == "author" || prefix == "file" {
+			scope = prefix
+			pat = pattern[idx+1:]
+		}
+	}
+
+	var targets []string
+	switch scope {
+	case "title":
+		targets = []string{title}
+	case "author":
+		targets = []string{author}
+	default:
+		targets = files
+	}
+
+	for _, target := range targets {
+		if matchSinglePattern(pat, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchPattern(pattern string, files []string) bool {
@@ -115,7 +143,6 @@ func matchPattern(pattern string, files []string) bool {
 var compiledPatterns = make(map[string]*regexp.Regexp)
 
 func matchSinglePattern(pattern, file string) bool {
-	// If pattern looks like a glob (contains *, ?, [, ]), try glob first
 	if strings.ContainsAny(pattern, "*?[") {
 		matched, _ := path.Match(pattern, file)
 		if matched {
@@ -123,7 +150,6 @@ func matchSinglePattern(pattern, file string) bool {
 		}
 	}
 
-	// Try regex
 	re, ok := compiledPatterns[pattern]
 	if !ok {
 		var err error

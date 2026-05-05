@@ -43,8 +43,16 @@ func Load(path string) (*models.Config, error) {
 
 	cfg := &models.Config{
 		Server: models.ServerConfig{
-			Listen: ":8080",
-			Mode:   "release",
+			Listen:                 ":8080",
+			Mode:                   "release",
+			CORSOrigins:            []string{"*"},
+			RateLimitEnabled:       true,
+			RateLimitRPS:           10,
+			RateLimitBurst:         20,
+			ReadTimeoutSeconds:     30,
+			WriteTimeoutSeconds:    30,
+			ShutdownTimeoutSeconds: 30,
+			MetricsLogInterval:     "5m",
 		},
 		MergeQueue: models.MergeQueueConfig{
 			RequiredApprovals: 1,

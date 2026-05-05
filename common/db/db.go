@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"asika/common/models"
@@ -53,6 +52,16 @@ func Close() error {
         return DB.Close()
     }
     return nil
+}
+
+// Ping checks if the database is accessible
+func Ping() error {
+    if DB == nil {
+        return fmt.Errorf("database not initialized")
+    }
+    return DB.View(func(tx *bbolt.Tx) error {
+        return nil
+    })
 }
 
 // Update wraps bbolt Update
@@ -150,11 +159,7 @@ func min(a, b int) int {
 	return b
 }
 
-// RunMigrations runs database migrations
-func RunMigrations() error {
-    slog.Info("running database migrations")
-    return nil
-}
+
 
 // PutPRWithIndex stores a PR and updates indices atomically
 func PutPRWithIndex(key string, value []byte, prID, repoGroup string, prNumber int) error {

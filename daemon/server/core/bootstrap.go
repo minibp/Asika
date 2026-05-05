@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -53,9 +54,13 @@ func Bootstrap(cfg *models.Config) (*InitConfig, error) {
 	if err := InitWithRetry(cfg.Database.Path, 5); err != nil {
 		return nil, err
 	}
-	slog.Info("database initialized", "path", cfg.Database.Path)
+ 	slog.Info("database initialized", "path", cfg.Database.Path)
 
-	auth.Init(cfg.Auth.JWTSecret, config.GenerateTokenExpiry(cfg.Auth.TokenExpiry))
+ 	if err := db.RunMigrations(); err != nil {
+ 		return nil, fmt.Errorf("database migration failed: %w", err)
+ 	}
+
+ 	auth.Init(cfg.Auth.JWTSecret, config.GenerateTokenExpiry(cfg.Auth.TokenExpiry))
 
 	clients := make(map[platforms.PlatformType]platforms.PlatformClient)
 	if cfg.Tokens.GitHub != "" {
@@ -89,9 +94,11 @@ func Bootstrap(cfg *models.Config) (*InitConfig, error) {
 	MigratePRStates(cfg)
 	SyncPRStates(cfg, clients)
 
-	ic.QueueMgr, ic.SpamDetector, ic.Poller, ic.EventConsumer, _ = StartWorkers(cfg, clients)
+ 	ic.QueueMgr, ic.SpamDetector, ic.Poller, ic.EventConsumer, _ = StartWorkers(cfg, clients)
 
-	SetupConfigReload()
+ 	InitNotifiers(cfg, clients)
+
+ 	SetupConfigReload()
 
 	ic.TgBot = StartTelegram(cfg, clients, ic.QueueMgr, nil, ic.SpamDetector)
 	ic.FsBot = StartFeishu(cfg, clients, ic.QueueMgr, nil, ic.SpamDetector)

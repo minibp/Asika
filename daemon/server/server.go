@@ -6,12 +6,15 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 
 	"asika/common/config"
+	"asika/common/db"
 	"asika/common/models"
 	"asika/common/platforms"
 	"asika/daemon/handlers"
@@ -61,23 +64,19 @@ func initCheckMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 
-		// Skip check for wizard, login, auth, and health paths
 		skip := false
-		// skipPaths that bypass init check (also add feishu callback)
-		skipPaths := []string{"/wizard", "/api/v1/wizard", "/api/v1/auth", "/login", "/health", "/api/v1/feishu"}
+		skipPaths := []string{"/api/v1/auth", "/api/v1/wizard", "/api/v1/feishu", "/login", "/wizard", "/health", "/metrics", "/debug/pprof"}
 		for _, p := range skipPaths {
 			if strings.HasPrefix(path, p) {
 				skip = true
 				break
 			}
 		}
-
-		if skip {
+		if path == "/health" || path == "/metrics" || skip {
 			c.Next()
 			return
 		}
 
-		// Check if config is loaded (atomic.Value), not just file existence
 		if config.Current() == nil {
 			if strings.HasPrefix(path, "/api/") {
 				c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -100,15 +99,35 @@ func (s *Server) setupMiddleware() {
 	s.engine.Use(initCheckMiddleware())
 	s.engine.Use(Logger())
 	s.engine.Use(gin.Recovery())
+	s.engine.Use(metricsMiddleware())
+	s.engine.Use(CORS(s.cfg.Server.CORSOrigins))
+	if s.cfg.Server.RateLimitEnabled {
+		s.engine.Use(RateLimit(rate.Limit(s.cfg.Server.RateLimitRPS), s.cfg.Server.RateLimitBurst))
+	}
 	s.engine.Use(AuthMiddleware())
 }
 
 // setupRoutes configures routes according to tasks.md section 8
 func (s *Server) setupRoutes() {
-	// Health check
-	s.engine.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	s.engine.GET("/health", healthHandler)
+	s.engine.GET("/metrics", metricsHandler)
+
+	// pprof debug endpoints (no auth, only in debug mode)
+	if s.cfg != nil && s.cfg.Server.EnablePprof {
+		debug := s.engine.Group("/debug/pprof")
+		debug.GET("/", gin.WrapF(pprof.Index))
+		debug.GET("/cmdline", gin.WrapF(pprof.Cmdline))
+		debug.GET("/profile", gin.WrapF(pprof.Profile))
+		debug.POST("/symbol", gin.WrapF(pprof.Symbol))
+		debug.GET("/symbol", gin.WrapF(pprof.Symbol))
+		debug.GET("/trace", gin.WrapF(pprof.Trace))
+		debug.GET("/allocs", gin.WrapF(pprof.Handler("allocs").ServeHTTP))
+		debug.GET("/block", gin.WrapF(pprof.Handler("block").ServeHTTP))
+		debug.GET("/goroutine", gin.WrapF(pprof.Handler("goroutine").ServeHTTP))
+		debug.GET("/heap", gin.WrapF(pprof.Handler("heap").ServeHTTP))
+		debug.GET("/mutex", gin.WrapF(pprof.Handler("mutex").ServeHTTP))
+		debug.GET("/threadcreate", gin.WrapF(pprof.Handler("threadcreate").ServeHTTP))
+	}
 
 	api := s.engine.Group("/api/v1")
 
@@ -149,12 +168,12 @@ func (s *Server) setupRoutes() {
 			prs.POST("/:pr_id/approve", handlers.ApprovePR)
 			prs.POST("/:pr_id/close", handlers.ClosePR)
 			prs.POST("/:pr_id/reopen", handlers.ReopenPR)
-		prs.POST("/:pr_id/spam", handlers.MarkSpam)
-		prs.POST("/:pr_id/comment", handlers.CommentPR)
-		prs.POST("/batch/approve", handlers.BatchApprovePR)
-		prs.POST("/batch/close", handlers.BatchClosePR)
-		prs.POST("/batch/label", handlers.BatchLabelPR)
-	}
+			prs.POST("/:pr_id/spam", handlers.MarkSpam)
+			prs.POST("/:pr_id/comment", handlers.CommentPR)
+			prs.POST("/batch/approve", handlers.BatchApprovePR)
+			prs.POST("/batch/close", handlers.BatchClosePR)
+			prs.POST("/batch/label", handlers.BatchLabelPR)
+		}
 
 		// Queue management (8.3)
 		queue := protected.Group("/queue/:repo_group")
@@ -169,14 +188,15 @@ func (s *Server) setupRoutes() {
 		logs.Use(RequireAnyRole("viewer", "operator", "admin"))
 		{
 			logs.GET("", handlers.GetLogs)
+			logs.GET("/export", handlers.ExportLogs)
 		}
 
 		// Config management (8.4)
-		config := protected.Group("/config")
-		config.Use(RequireRole("admin"))
+		cfgGroup := protected.Group("/config")
+		cfgGroup.Use(RequireRole("admin"))
 		{
-			config.GET("", handlers.GetConfig)
-			config.PUT("", handlers.UpdateConfig)
+			cfgGroup.GET("", handlers.GetConfig)
+			cfgGroup.PUT("", handlers.UpdateConfig)
 		}
 
 		// Sync history (8.5)
@@ -299,9 +319,20 @@ func (s *Server) Start() error {
 		addr = s.cfg.Server.Listen
 	}
 
+	readTimeout := time.Duration(s.cfg.Server.ReadTimeoutSeconds) * time.Second
+	writeTimeout := time.Duration(s.cfg.Server.WriteTimeoutSeconds) * time.Second
+	if readTimeout == 0 {
+		readTimeout = 30 * time.Second
+	}
+	if writeTimeout == 0 {
+		writeTimeout = 30 * time.Second
+	}
+
 	s.httpSrv = &http.Server{
-		Addr:    addr,
-		Handler: s.engine,
+		Addr:         addr,
+		Handler:      s.engine,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
 	}
 
 	slog.Info("starting server", "listen", addr)
@@ -313,7 +344,33 @@ func (s *Server) Stop() error {
 	if s.httpSrv == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	timeout := time.Duration(s.cfg.Server.ShutdownTimeoutSeconds) * time.Second
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return s.httpSrv.Shutdown(ctx)
+}
+
+func healthHandler(c *gin.Context) {
+	dbHealthy := db.Ping() == nil
+	metrics := GetMetrics()
+	status := "healthy"
+	statusCode := http.StatusOK
+	if !dbHealthy {
+		status = "degraded"
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	c.JSON(statusCode, gin.H{
+		"status":    status,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"uptime":    fmt.Sprintf("%.0fs", metrics["uptime_seconds"]),
+		"database":  map[string]bool{"connected": dbHealthy},
+		"metrics": map[string]interface{}{
+			"goroutines": metrics["goroutines"],
+			"memory_mb":  float64(metrics["memory_alloc_bytes"].(uint64)) / 1024 / 1024,
+		},
+	})
 }

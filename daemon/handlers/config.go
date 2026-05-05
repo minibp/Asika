@@ -110,11 +110,14 @@ func UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	// Trigger hot reload
-	cfg := config.Current()
-	if cfg != nil {
-		config.Store(cfg) // In real impl, would reload from file
+	// Trigger hot reload - reload from disk to pick up the written changes
+	reloadedCfg, err := config.Load(configPath)
+	if err != nil {
+		slog.Error("config saved but reload failed", "error", err)
+		c.JSON(http.StatusOK, gin.H{"message": "config saved but reload failed", "error": err.Error()})
+		return
 	}
+	config.Store(reloadedCfg)
 
 	slog.Info("config updated", "path", configPath)
 	c.JSON(http.StatusOK, gin.H{"message": "config updated successfully"})

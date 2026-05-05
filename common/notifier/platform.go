@@ -89,6 +89,28 @@ func (n *PlatformNotifier) SetClient(client platforms.PlatformClient) {
 	n.client = client
 }
 
+// WirePlatformNotifiers injects platform clients into platform_at notifiers based on notifier type.
+func WirePlatformNotifiers(notifiers []Notifier, clients map[platforms.PlatformType]platforms.PlatformClient) {
+	for _, n := range notifiers {
+		pn, ok := n.(*PlatformNotifier)
+		if !ok {
+			continue
+		}
+		var pt platforms.PlatformType
+		switch pn.platform {
+		case "github":
+			pt = platforms.PlatformGitHub
+		case "gitlab":
+			pt = platforms.PlatformGitLab
+		case "gitea":
+			pt = platforms.PlatformGitea
+		}
+		if client, exists := clients[pt]; exists {
+			pn.SetClient(client)
+		}
+	}
+}
+
 // Type returns the type of notifier
 func (n *PlatformNotifier) Type() string {
 	return n.platform + "_at"
