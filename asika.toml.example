@@ -1,0 +1,214 @@
+# Asika Configuration
+# See: https://github.com/minibp/asika for documentation
+
+# Server settings
+[server]
+listen = ":8080"
+mode   = "release"   # "debug" | "release"
+enable_web_update = false   # allow admin to update from WebUI
+
+# Mode: "multi" for cross-platform sync, "single" for single repo
+mode = "multi"
+
+# Database (bbolt)
+[database]
+path = "/var/lib/asika/asika.db"
+
+# Authentication
+[auth]
+jwt_secret    = "change-me-in-production"
+token_expiry  = "72h"
+
+# Event source: "webhook" or "polling"
+[events]
+mode            = "webhook"
+webhook_secret  = "change-me-webhook-secret"
+polling_interval = "5m"   # only used when mode = "polling"
+
+# Git work directory for temp bare repos
+[git]
+workdir = "/var/lib/asika/work"
+
+# Platform tokens (or use env vars: ASIKA_GITHUB_TOKEN, etc.)
+[tokens]
+github = ""
+gitlab = ""
+gitea  = ""
+
+# Merge queue defaults (overridable per repo group)
+[merge_queue]
+required_approvals = 1
+ci_check_required  = true
+core_contributors  = ["admin1", "admin2"]
+
+# Spam detection
+[spam]
+enabled                    = true
+time_window                = "10m"
+threshold                  = 3
+trigger_on_author          = true
+trigger_on_similar_title   = true
+title_similarity_threshold = 0.6
+trigger_on_title_kw        = ["spam", "fix typo", "readme update"]
+
+# Notification channels
+[[notify]]
+type   = "smtp"
+config = { host = "smtp.example.com", port = 587, username = "bot@example.com", password = "change-me", to = ["admin@example.com"] }
+
+# [[notify]]
+# type   = "feishu"
+# config = { webhook_url = "https://open.feishu.cn/open-apis/bot/v2/hook/xxx" }
+
+# [[notify]]
+# type   = "feishu"
+# config = { app_id = "cli_xxx", app_secret = "yyy", to = ["oc_xxx", "ou_xxx"], receive_id_type = "chat_id" }
+
+# [[notify]]
+# type   = "telegram"
+# config = { token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", to = ["@mychannel", "12345678"] }
+
+# [[notify]]
+# type   = "telegram"
+# config = { token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", to = ["@mychannel"], http_token = "same_or_different_token" }
+
+# [[notify]]
+# type   = "github_at"
+# config = { owner = "your-org", repo = "your-repo", to = ["admin1"] }
+
+# [[notify]]
+# type   = "gitlab_at"
+# config = { owner = "your-org", repo = "your-repo", to = ["admin1"] }
+
+# [[notify]]
+# type   = "gitea_at"
+# config = { owner = "your-org", repo = "your-repo", to = ["admin1"] }
+
+# [[notify]]
+# type   = "discord"
+# config = { token = "your-bot-token", channel_ids = ["channel_id_1", "channel_id_2"] }
+
+# [[notify]]
+# type   = "wecom"
+# [notify.config]
+# webhook_url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+
+# [[notify]]
+# type   = "wecom"
+# [notify.config]
+# webhook_urls = ["https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx", "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=yyy"]
+# mentioned_list = ["zhangsan", "lisi"]
+# mentioned_mobile_list = ["13800138000"]
+# msg_type = "markdown"  # "markdown" (default), "textcard", "text"
+
+# [[notify]]
+# type   = "wecom"
+# [notify.config]
+# corp_id = "wwxxxxxxxxxx"
+# corp_secret = "xxxxxxxx"
+# agent_id = 1000001
+# to_user = ["zhangsan", "lisi"]
+# msg_type = "textcard"
+
+# [[notify]]
+# type   = "dingtalk"
+# [notify.config]
+# webhook_url = "https://oapi.dingtalk.com/robot/send?access_token=xxx"
+# secret = "SECxxx"  # optional, for HMAC-SHA256 signature
+# at_mobiles = ["13800001111"]  # optional, @specific users by mobile
+# at_all = false  # optional, @everyone
+# msg_type = "markdown"  # "text" (default), "markdown", "link", "actionCard", "feedCard"
+
+# Label rules (hot-reloadable)
+[[label_rules]]
+pattern = "**/*.go"
+label   = "go"
+color   = "#00ADD8"
+description = "Go source files"
+
+[[label_rules]]
+pattern = "**/*.js"
+label   = "javascript"
+color   = "#F7DF1E"
+
+[[label_rules]]
+pattern = "docs/**"
+label   = "documentation"
+color   = "#008672"
+
+# Repo groups (multi mode)
+[[repo_groups]]
+name           = "my-project"
+mode           = "multi"         # overrides global mode per group
+github         = "my-org/my-repo"
+gitlab         = "my-org/my-repo"
+gitea          = "my-org/my-repo"
+default_branch = "main"
+hookpath       = ""
+ci_provider    = "github_actions"  # "github_actions" | "gitlab_ci" | "gitea_actions" | "none"
+
+[repo_groups.merge_queue]
+required_approvals = 2
+ci_check_required  = true
+core_contributors  = ["senior-dev1", "senior-dev2"]
+
+# Single repo mode (only used when global mode = "single")
+# [single_repo]
+# platform       = "github"      # mirror_platform in tasks.md, the active platform
+# repo           = "my-org/my-repo"
+# default_branch = "main"
+# hookpath       = ""
+# ci_provider    = "github_actions"
+
+# Custom hook path (global)
+hookpath = ""
+
+# Self-update configuration
+[updates]
+check         = false    # periodically check for new versions
+interval      = "24h"    # check interval
+notify_on_new = false    # send notification through configured channels
+
+# Stale PR management
+[stale]
+enabled           = false           # enable stale PR detection
+check_interval    = "6h"            # how often to scan for stale PRs
+days_until_stale  = 21              # days inactive before marking as stale
+days_until_close  = 0               # days after stale to auto-close (0 = never)
+stale_label       = "stale"         # label to apply to stale PRs
+exempt_labels     = ["long-term"]   # labels that prevent stale marking
+notify_on_stale   = true            # send notification when PR is marked stale
+remove_stale_on_activity = true     # remove stale label on new activity
+skip_draft_prs    = true            # skip draft/WIP PRs
+
+# comment_on_stale = \"\"\"
+# This PR has been marked as stale due to {{.Days}} days of inactivity.
+# It will be closed in {{.CloseIn}} if no further activity occurs.
+# Add the `{{.ExemptLabel}}` label or leave a comment to keep it open.
+# \"\"\"
+#
+# comment_on_close = "Automatically closed due to inactivity."
+
+# Discord bot configuration
+[discord]
+enabled    = false
+token      = "your-bot-token"
+admin_ids  = ["user_id_1", "user_id_2"]
+channel_id = "your-channel-id"
+
+# Feishu/Lark bot configuration
+[feishu]
+enabled            = false
+app_id             = "cli_xxx"
+app_secret         = "yyy"
+webhook_url        = ""  # optional, for notifications
+verification_token = ""  # for event callback verification
+encrypt_key        = ""  # for event callback encryption
+admin_ids          = ["ou_xxx", "oc_xxx"]
+
+# Telegram bot configuration
+[telegram]
+enabled   = false
+token     = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+admin_ids = [12345678, 87654321]
+chat_ids  = ["@mychannel", "-1001234567890"]
