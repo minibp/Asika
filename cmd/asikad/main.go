@@ -75,12 +75,17 @@ func main() {
         return
     }
 
-    // Initialize database with retry (handles stale lock from ungraceful shutdown)
-    if err := dbInitWithRetry(cfg.Database.Path, 5); err != nil {
-        slog.Error("failed to initialize database", "error", err)
-        os.Exit(1)
-    }
-    defer db.Close()
+     // Initialize database with retry (handles stale lock from ungraceful shutdown)
+     if err := dbInitWithRetry(cfg.Database.Path, 5); err != nil {
+         slog.Error("failed to initialize database", "error", err)
+         os.Exit(1)
+     }
+     slog.Info("database initialized", "path", cfg.Database.Path)
+     defer func() {
+         slog.Info("closing database")
+         db.Close()
+         slog.Info("database closed")
+     }()
 
     // Migrate old DB records (repo group name changes, e.g. "main" -> "default")
     migrateRepoGroupNames(cfg)
@@ -113,22 +118,17 @@ func main() {
     // Initialize event bus (must be before PR fetch to avoid panic)
     events.Init()
 
-     // Initial PR fetch: fetch all PRs from platforms after events init
-     slog.Info("performing initial PR fetch before starting server...")
-     var poller *polling.Poller
-     if cfg.Events.Mode == "polling" {
-         poller = polling.NewPoller(cfg, clients)
-         poller.PollOnce() // Synchronous initial fetch
-         slog.Info("initial PR fetch complete")
-         // Start background polling
-         go poller.Start()
-         slog.Info("background poller started")
-     } else {
-         // Even in webhook mode, do an initial fetch
-         poller = polling.NewPoller(cfg, clients)
-         poller.PollOnce()
-         slog.Info("initial PR fetch complete (webhook mode)")
-     }
+      // Initial PR fetch: fetch all PRs from platforms after events init
+      var poller *polling.Poller
+      if cfg.Events.Mode == "polling" {
+          poller = polling.NewPoller(cfg, clients)
+          poller.PollOnce() // Synchronous initial fetch
+          go poller.Start()
+          slog.Info("background poller started")
+      } else {
+          poller = polling.NewPoller(cfg, clients)
+          poller.PollOnce()
+      }
 
     // Setup SIGHUP handler for config reload
     setupSIGHUPHandler()

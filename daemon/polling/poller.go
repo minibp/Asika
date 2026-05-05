@@ -1,19 +1,19 @@
 package polling
 
 import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "log/slog"
-    "strings"
-    "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
 
-    "github.com/google/uuid"
+	"github.com/google/uuid"
 
-    "asika/common/db"
-    "asika/common/events"
-    "asika/common/models"
-    "asika/common/platforms"
+	"asika/common/db"
+	"asika/common/events"
+	"asika/common/models"
+	"asika/common/platforms"
 )
 
 // Poller polls platforms for PR changes
@@ -62,15 +62,21 @@ func (p *Poller) Stop() {
 }
 
 func (p *Poller) pollOnce() {
+	var success, failed int
 	for _, repoGroup := range p.cfg.RepoGroups {
-		p.pollRepoGroup(repoGroup)
+		s, f := p.pollRepoGroup(repoGroup)
+		success += s
+		failed += f
+	}
+	if total := success + failed; total > 0 {
+		slog.Info("PR fetch complete", "total", total, "success", success, "failed", failed)
 	}
 }
 
-func (p *Poller) pollRepoGroup(rg models.RepoGroupConfig) {
+func (p *Poller) pollRepoGroup(rg models.RepoGroupConfig) (success, failed int) {
 	platforms := []struct {
-		ptype   platforms.PlatformType
-		repo    string
+		ptype platforms.PlatformType
+		repo  string
 	}{
 		{platforms.PlatformGitHub, rg.GitHub},
 		{platforms.PlatformGitLab, rg.GitLab},
@@ -86,11 +92,14 @@ func (p *Poller) pollRepoGroup(rg models.RepoGroupConfig) {
 			continue
 		}
 
-		p.pollPlatform(client, rg.Name, string(pinfo.ptype), pinfo.repo)
+		s, f := p.pollPlatform(client, rg.Name, string(pinfo.ptype), pinfo.repo)
+		success += s
+		failed += f
 	}
+	return
 }
 
-func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platform, repo string) {
+func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platform, repo string) (success, failed int) {
 	ctx := context.Background()
 
 	// Parse owner/repo using the same logic as config.GetOwnerRepoFromGroup
@@ -105,7 +114,7 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 	prs, err := client.ListPRs(ctx, owner, repoName, "all")
 	if err != nil {
 		slog.Error("failed to list PRs", "platform", platform, "repo", repo, "error", err)
-		return
+		return 0, 1
 	}
 
 	// Compare with local DB and publish events
@@ -123,8 +132,6 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 		data, _ := db.Get(db.BucketPRs, key)
 
 		if data == nil {
-			// New PR
-			slog.Info("new PR detected", "pr", pr.Title, "platform", platform)
 			pr.CreatedAt = time.Now()
 			pr.UpdatedAt = time.Now()
 			events.PublishPR(events.EventPROpened, repoGroup, platform, pr, nil)
@@ -133,7 +140,6 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 			var existing models.PRRecord
 			if err := json.Unmarshal(data, &existing); err == nil {
 				if existing.State != pr.State {
-					slog.Info("PR state changed", "pr", pr.Title, "old", existing.State, "new", pr.State)
 					switch pr.State {
 					case "open":
 						events.PublishPR(events.EventPROpened, repoGroup, platform, pr, nil)
@@ -151,8 +157,14 @@ func (p *Poller) pollPlatform(client platforms.PlatformClient, repoGroup, platfo
 			pr.ID = uuid.New().String()
 		}
 		prData, _ := json.Marshal(pr)
-		db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber)
+		if err := db.PutPRWithIndex(key, prData, pr.ID, pr.RepoGroup, pr.PRNumber); err != nil {
+			slog.Error("failed to save PR", "pr", pr.PRNumber, "platform", platform, "error", err)
+			failed++
+		} else {
+			success++
+		}
 	}
+	return
 }
 
 func parseDuration(s string, defaultVal time.Duration) time.Duration {
