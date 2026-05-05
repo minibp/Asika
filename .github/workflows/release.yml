@@ -38,8 +38,6 @@ jobs:
         run: |
           mkdir -p bin
           TAG=${GITHUB_REF#refs/tags/v}
-          HASH=$(git rev-parse --short=7 HEAD)
-          TAG="${TAG}-${HASH}"
           for GOOS in linux darwin windows; do
             for GOARCH in amd64 arm64; do
               if [ "$GOOS" = "windows" ] && [ "$GOARCH" = "arm64" ]; then
