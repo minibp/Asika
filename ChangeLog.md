@@ -1,5 +1,8 @@
 # ChangeLog for Asika
 
+## Unreleased
+- Add Telegram bot command menu (setMyCommands) for quick command access in UI
+
 ## v20260505DEV
 - Fix ForEachPrefix using index key instead of value to fetch from target bucket (caused ListPRs returning empty)
 - Fix poller overwriting local-only fields (IsApproved, SpamFlag) during sync

@@ -73,6 +73,7 @@ func (b *TelegramBot) Start() {
 	slog.Info("starting telegram interactive bot")
 
 	b.registerCommands()
+	b.registerBotMenu()
 
 	go func() {
 		b.bot.Start()
@@ -109,6 +110,29 @@ func (b *TelegramBot) registerCommands() {
 
 	// Handle text messages for natural language-ish commands
 	b.bot.Handle(telebot.OnText, b.handleText)
+}
+
+// registerBotMenu sets the bot command menu shown in Telegram's UI.
+func (b *TelegramBot) registerBotMenu() {
+	commands := []telebot.Command{
+		{Text: "start", Description: "Welcome & admin info"},
+		{Text: "help", Description: "Show all commands"},
+		{Text: "prs", Description: "List PRs in a group"},
+		{Text: "pr", Description: "Show PR details & actions"},
+		{Text: "approve", Description: "Approve a PR"},
+		{Text: "close", Description: "Close a PR"},
+		{Text: "reopen", Description: "Reopen a PR"},
+		{Text: "spam", Description: "Mark PR as spam"},
+		{Text: "queue", Description: "Show merge queue"},
+		{Text: "recheck", Description: "Trigger queue recheck"},
+		{Text: "config", Description: "Show current config"},
+		{Text: "stalecheck", Description: "Check for stale PRs"},
+		{Text: "unstale", Description: "Remove stale label"},
+	}
+
+	if err := b.bot.SetCommands(commands); err != nil {
+		slog.Warn("telegram bot: failed to set command menu", "error", err)
+	}
 }
 
 // isAdmin checks if the sender is an authorized admin.
