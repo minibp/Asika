@@ -1,57 +1,137 @@
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│              Asika Daemon (asikad)                     │
-│                                                       │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
-│  │  HTTP    │  │  Queue   │  │  Syncer  │          │
-│  │  Server  │  │  Manager │  │  (multi) │          │
-│  └──────────┘  └──────────┘  └──────────┘          │
-│                                                       │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
-│  │ Platform │  │  Event   │  │ Consumer │          │
-│  │  Clients │  │   Bus    │  │  +Labeler│          │
-│  └──────────┘  └──────────┘  └──────────┘          │
-│                                                       │
-│  ┌─────────────────────────────────────────────────┐  │
-│  │   Notifications: SMTP / Telegram / Feishu      │  │
-│  └─────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-         ↑                        ↑
-    Webhooks / Polling      CLI (asika)
+```mermaid
+graph TB
+    subgraph External["External Systems"]
+        GH[GitHub API]
+        GL[GitLab API]
+        GT[Gitea API]
+        WH[Webhooks]
+    end
+
+    subgraph CLI["CLI (asika)"]
+        CM[Cobra Commands]
+        SU[Self-Update]
+    end
+
+    subgraph Daemon["Daemon (asikad)"]
+        subgraph HTTP["HTTP Server (gin)"]
+            MW[Middleware Chain]
+            RO[API Routes]
+        end
+
+        subgraph Core["Core"]
+            QC[Queue Manager]
+            SY[Syncer]
+            EC[Event Consumer]
+            LB[Labeler]
+        end
+
+        subgraph Platforms["Platform Clients"]
+            PC_GH[GitHub Client]
+            PC_GL[GitLab Client]
+            PC_GT[Gitea Client]
+        end
+
+        subgraph Events["Event Bus"]
+            EB[Event Publisher/Subscriber]
+        end
+
+        subgraph Notify["Notifications"]
+            SMTP[SMTP]
+            TG[Telegram Bot]
+            FS[Feishu Bot]
+            DC[Discord Bot]
+        end
+
+        subgraph DB["Storage"]
+            BDB[(bbolt Database)]
+        end
+    end
+
+    GH --> PC_GH
+    GL --> PC_GL
+    GT --> PC_GT
+    WH --> MW
+
+    CM --> RO
+    SU --> GH
+
+    MW --> RO
+    RO --> QC
+    RO --> SY
+    RO --> EC
+
+    QC --> EB
+    SY --> EB
+    EB --> EC
+    EC --> LB
+    EC --> QC
+
+    PC_GH --> SY
+    PC_GL --> SY
+    PC_GT --> SY
+
+    QC --> SMTP
+    QC --> TG
+    QC --> FS
+    QC --> DC
+
+    SY --> BDB
+    QC --> BDB
+    EC --> BDB
 ```
 
 ## Development
 
 ### Project Structure
 
-```
-cmd/
-  asika/      → CLI binary (Cobra commands)
-  asikad/     → Daemon binary (HTTP server)
+```mermaid
+graph LR
+    subgraph cmd["cmd/"]
+        ASIKA[asika/ → CLI binary]
+        ASIKAD[asikad/ → Daemon binary]
+    end
 
-common/
-  config/     → Config loading, validation, hot/cold reload
-  db/         → bbolt database wrapper
-  platforms/  → Platform clients (GitHub/GitLab/Gitea)
-  models/     → Data structures (PRRecord, QueueItem, Config...)
-  events/     → Internal event bus
-  auth/       → JWT, password hash
-  gitutil/    → Pure Go git operations (no system git)
-  ci/         → CI provider auto-detection
+    subgraph common["common/"]
+        CONFIG[config/ → Config loading/validation]
+        DB[db/ → bbolt wrapper]
+        PLAT[platforms/ → GitHub/GitLab/Gitea clients]
+        MODELS[models/ → Data structures]
+        EVENTS[events/ → Event bus]
+        AUTH[auth/ → JWT, password hash]
+        GIT[gitutil/ → Pure Go git ops]
+        CI[ci/ → CI provider detection]
+        NOTIF[notifier/ → Notification channels]
+        VER[version/ → Version info]
+    end
 
-daemon/
-  server/     → Bootstrap, HTTP server, middleware
-  handlers/   → API routes (auth, prs, queue, webhook, feishu)
-  queue/      → Merge queue state machine
-  syncer/     → Cross-platform code sync + spam detector
-  notifier/   → Notification channels (SMTP/Telegram/Feishu...)
-  platform/   → Telegram/Feishu bot implementations
-  consumer/   → Event consumer (wires events → queue/labeler)
-  labeler/    → Label rule engine
-  polling/    → Polling mode (alternative to webhooks)
-  templates/  → Responsive Web UI (Go html/template)
+    subgraph daemon["daemon/"]
+        SRV[server/ → HTTP server, middleware, bootstrap]
+        HAND[handlers/ → API routes]
+        QUEUE[queue/ → Merge queue state machine]
+        SYNC[syncer/ → Cross-platform sync]
+        CONS[consumer/ → Event consumer]
+        LABEL[labeler/ → Label rule engine]
+        POLL[polling/ → Polling mode]
+        TPL[templates/ → Web UI templates]
+        BOTS[platform/ → Telegram/Feishu bots]
+        HOOKS[hooks/ → Git hook runner]
+        STALE[stale/ → Stale PR management]
+    end
+
+    subgraph lib["lib/"]
+        LIB_CMD[commands/ → CLI command handlers]
+    end
+
+    ASIKA --> LIB_CMD
+    ASIKAD --> SRV
+    SRV --> HAND
+    SRV --> QUEUE
+    HAND --> SYNC
+    HAND --> CONS
+    CONS --> LABEL
+    CONS --> QUEUE
 ```
 
 ### Running Tests
